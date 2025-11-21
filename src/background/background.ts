@@ -1,0 +1,363 @@
+import { Wallet } from '../core/wallet';
+import { StorageService } from '../services/storage';
+import { ethers } from 'ethers';
+
+// In-memory wallet instance (cleared when locked)
+let walletInstance: Wallet | null = null;
+
+interface Message {
+  type: string;
+  payload?: any;
+}
+
+interface MessageResponse {
+  success: boolean;
+  data?: any;
+  error?: string;
+}
+
+/**
+ * Handle messages from popup and content scripts
+ */
+chrome.runtime.onMessage.addListener((
+  message: Message,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: MessageResponse) => void
+) => {
+  handleMessage(message, sender)
+    .then(data => sendResponse({ success: true, data }))
+    .catch(error => sendResponse({ success: false, error: error.message }));
+
+  return true; // Keep channel open for async response
+});
+
+/**
+ * Handle external messages from web pages (via content script)
+ */
+chrome.runtime.onMessageExternal?.addListener((
+  message: Message,
+  sender: chrome.runtime.MessageSender,
+  sendResponse: (response: MessageResponse) => void
+) => {
+  handleExternalMessage(message, sender)
+    .then(data => sendResponse({ success: true, data }))
+    .catch(error => sendResponse({ success: false, error: error.message }));
+
+  return true;
+});
+
+/**
+ * Route messages to appropriate handlers
+ */
+async function handleMessage(
+  message: Message,
+  sender: chrome.runtime.MessageSender
+): Promise<any> {
+  const { type, payload } = message;
+
+  switch (type) {
+    case 'CREATE_WALLET':
+      return await createWallet(payload);
+
+    case 'UNLOCK_WALLET':
+      return await unlockWallet(payload.password);
+
+    case 'LOCK_WALLET':
+      return await lockWallet();
+
+    case 'GET_WALLET_STATUS':
+      return await getWalletStatus();
+
+    case 'ADD_ACCOUNT':
+      return await addAccount();
+
+    case 'GET_ACCOUNTS':
+      return await StorageService.getAccounts();
+
+    case 'GET_CURRENT_ACCOUNT':
+      return await StorageService.getCurrentAccount();
+
+    case 'SET_CURRENT_ACCOUNT':
+      return await StorageService.setCurrentAccount(payload.index);
+
+    case 'GET_NETWORKS':
+      return await StorageService.getNetworks();
+
+    case 'GET_CURRENT_NETWORK':
+      return await StorageService.getCurrentNetwork();
+
+    case 'SET_CURRENT_NETWORK':
+      return await StorageService.setCurrentNetwork(payload.index);
+
+    case 'ADD_NETWORK':
+      return await StorageService.addNetwork(payload.network);
+
+    case 'GET_BALANCE':
+      return await getBalance(payload.address);
+
+    case 'SIGN_MESSAGE':
+      return await signMessage(payload);
+
+    case 'SIGN_TRANSACTION':
+      return await signTransaction(payload);
+
+    case 'SEND_TRANSACTION':
+      return await sendTransaction(payload);
+
+    case 'REQUEST_ACCOUNTS':
+      return await requestAccounts(sender);
+
+    default:
+      throw new Error(`Unknown message type: ${type}`);
+  }
+}
+
+/**
+ * Handle messages from web pages (EIP-1193 provider requests)
+ */
+async function handleExternalMessage(
+  message: Message,
+  sender: chrome.runtime.MessageSender
+): Promise<any> {
+  const { type, payload } = message;
+
+  // Verify sender origin
+  if (!sender.url) {
+    throw new Error('Invalid sender');
+  }
+
+  switch (type) {
+    case 'ETH_REQUEST_ACCOUNTS':
+      return await requestAccounts(sender);
+
+    case 'ETH_SIGN_MESSAGE':
+      return await requestSignature(payload, sender);
+
+    case 'ETH_SEND_TRANSACTION':
+      return await requestTransaction(payload, sender);
+
+    default:
+      throw new Error(`Unknown external message type: ${type}`);
+  }
+}
+
+/**
+ * Create a new wallet
+ */
+async function createWallet(payload: { password: string; mnemonic?: string }) {
+  const { password, mnemonic: providedMnemonic } = payload;
+
+  const wallet = new Wallet();
+  const mnemonic = providedMnemonic || Wallet.generateMnemonic();
+
+  await wallet.fromMnemonic(mnemonic);
+
+  // Derive first account
+  const account = wallet.deriveAccount(0);
+
+  await StorageService.createWallet(mnemonic, password, [account]);
+
+  walletInstance = wallet;
+
+  return { address: account.address };
+}
+
+/**
+ * Unlock wallet
+ */
+async function unlockWallet(password: string) {
+  const mnemonic = await StorageService.unlockWallet(password);
+
+  const wallet = new Wallet();
+  await wallet.fromMnemonic(mnemonic);
+
+  walletInstance = wallet;
+
+  const currentAccount = await StorageService.getCurrentAccount();
+  return { address: currentAccount?.address };
+}
+
+/**
+ * Lock wallet
+ */
+async function lockWallet() {
+  walletInstance?.clear();
+  walletInstance = null;
+  await StorageService.lockWallet();
+  return { locked: true };
+}
+
+/**
+ * Get wallet status
+ */
+async function getWalletStatus() {
+  const exists = await StorageService.walletExists();
+  const isLocked = await StorageService.isLocked();
+
+  return { exists, isLocked };
+}
+
+/**
+ * Add a new account
+ */
+async function addAccount() {
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const accounts = await StorageService.getAccounts();
+  const newIndex = accounts.length;
+
+  const account = walletInstance.deriveAccount(newIndex);
+  await StorageService.addAccount(account);
+
+  return account;
+}
+
+/**
+ * Get balance for an address
+ */
+async function getBalance(address: string) {
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  const provider = new ethers.JsonRpcProvider(network.rpcUrl);
+  const balance = await provider.getBalance(address);
+
+  return {
+    balance: balance.toString(),
+    formatted: ethers.formatEther(balance)
+  };
+}
+
+/**
+ * Sign a message
+ */
+async function signMessage(payload: { message: string; path: string }) {
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const signature = await walletInstance.signMessage(payload.message, payload.path);
+  return { signature };
+}
+
+/**
+ * Sign a transaction
+ */
+async function signTransaction(payload: {
+  transaction: ethers.TransactionRequest;
+  path: string;
+}) {
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const signedTx = await walletInstance.signTransaction(
+    payload.transaction,
+    payload.path
+  );
+
+  return { signedTransaction: signedTx };
+}
+
+/**
+ * Send a transaction
+ */
+async function sendTransaction(payload: {
+  transaction: ethers.TransactionRequest;
+  path: string;
+}) {
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  const provider = new ethers.JsonRpcProvider(network.rpcUrl);
+  const signedTx = await walletInstance.signTransaction(
+    payload.transaction,
+    payload.path
+  );
+
+  const txResponse = await provider.broadcastTransaction(signedTx);
+
+  return {
+    hash: txResponse.hash,
+    from: txResponse.from,
+    to: txResponse.to
+  };
+}
+
+/**
+ * Request accounts (for EIP-1193)
+ */
+async function requestAccounts(sender: chrome.runtime.MessageSender) {
+  const isLocked = await StorageService.isLocked();
+  if (isLocked) {
+    throw new Error('Wallet is locked. Please unlock your wallet.');
+  }
+
+  const currentAccount = await StorageService.getCurrentAccount();
+  if (!currentAccount) {
+    throw new Error('No account available');
+  }
+
+  // In a production wallet, you would show a permission prompt here
+  // For now, we'll auto-approve
+
+  return [currentAccount.address];
+}
+
+/**
+ * Request signature from user
+ */
+async function requestSignature(
+  payload: { message: string },
+  sender: chrome.runtime.MessageSender
+) {
+  // In production, show a confirmation popup
+  const currentAccount = await StorageService.getCurrentAccount();
+  if (!currentAccount) {
+    throw new Error('No account selected');
+  }
+
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const signature = await walletInstance.signMessage(
+    payload.message,
+    currentAccount.derivationPath
+  );
+
+  return signature;
+}
+
+/**
+ * Request transaction from user
+ */
+async function requestTransaction(
+  payload: { transaction: ethers.TransactionRequest },
+  sender: chrome.runtime.MessageSender
+) {
+  // In production, show a confirmation popup
+  const currentAccount = await StorageService.getCurrentAccount();
+  if (!currentAccount) {
+    throw new Error('No account selected');
+  }
+
+  const result = await sendTransaction({
+    transaction: payload.transaction,
+    path: currentAccount.derivationPath
+  });
+
+  return result.hash;
+}
+
+console.log('Crypto Wallet background service worker initialized');

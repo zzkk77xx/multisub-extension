@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Crypto Wallet</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 360px;
+      min-height: 600px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: #333;
+    }
+
+    .container {
+      background: white;
+      min-height: 600px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .header .network {
+      font-size: 12px;
+      opacity: 0.9;
+      margin-top: 8px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 4px 12px;
+      border-radius: 12px;
+      display: inline-block;
+    }
+
+    .content {
+      flex: 1;
+      padding: 20px;
+    }
+
+    .screen {
+      display: none;
+    }
+
+    .screen.active {
+      display: block;
+    }
+
+    .balance {
+      text-align: center;
+      margin: 30px 0;
+    }
+
+    .balance-amount {
+      font-size: 36px;
+      font-weight: 700;
+      color: #667eea;
+      margin: 10px 0;
+    }
+
+    .balance-usd {
+      font-size: 18px;
+      color: #888;
+    }
+
+    .account {
+      background: #f7f7f7;
+      border-radius: 12px;
+      padding: 15px;
+      margin: 20px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .account-info {
+      flex: 1;
+    }
+
+    .account-name {
+      font-weight: 600;
+      margin-bottom: 5px;
+    }
+
+    .account-address {
+      font-size: 12px;
+      color: #888;
+      font-family: 'Courier New', monospace;
+    }
+
+    .button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      width: 100%;
+      margin: 10px 0;
+      transition: transform 0.2s;
+    }
+
+    .button:hover {
+      transform: translateY(-2px);
+    }
+
+    .button:active {
+      transform: translateY(0);
+    }
+
+    .button-secondary {
+      background: #f7f7f7;
+      color: #667eea;
+    }
+
+    .input-group {
+      margin: 15px 0;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .input-group input,
+    .input-group textarea {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      transition: border-color 0.2s;
+    }
+
+    .input-group input:focus,
+    .input-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .input-group textarea {
+      resize: vertical;
+      min-height: 80px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
+    }
+
+    .actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 20px 0;
+    }
+
+    .action-btn {
+      background: white;
+      border: 2px solid #e0e0e0;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .action-btn:hover {
+      border-color: #667eea;
+      background: #f7f7f7;
+    }
+
+    .action-btn-icon {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .action-btn-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .mnemonic-display {
+      background: #f7f7f7;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 15px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      margin: 15px 0;
+      word-break: break-word;
+    }
+
+    .warning {
+      background: #fff3cd;
+      border: 2px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 15px 0;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .warning strong {
+      display: block;
+      margin-bottom: 5px;
+      color: #856404;
+    }
+
+    .error {
+      background: #f8d7da;
+      border: 2px solid #dc3545;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 15px 0;
+      font-size: 13px;
+      color: #721c24;
+    }
+
+    .success {
+      background: #d4edda;
+      border: 2px solid #28a745;
+      border-radius: 8px;
+      padding: 15px;
+      margin: 15px 0;
+      font-size: 13px;
+      color: #155724;
+    }
+
+    .loading {
+      text-align: center;
+      padding: 40px;
+    }
+
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid #667eea;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .copy-btn {
+      background: #667eea;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+
+    .tabs {
+      display: flex;
+      border-bottom: 2px solid #e0e0e0;
+      margin-bottom: 20px;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 12px;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 600;
+      color: #888;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      transition: all 0.2s;
+    }
+
+    .tab.active {
+      color: #667eea;
+      border-bottom-color: #667eea;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Crypto Wallet</h1>
+      <div class="network" id="network-name">Ethereum Mainnet</div>
+    </div>
+
+    <div class="content">
+      <!-- Welcome Screen -->
+      <div id="welcome-screen" class="screen">
+        <h2 style="margin: 40px 0 20px; text-align: center;">Welcome to Crypto Wallet</h2>
+        <p style="text-align: center; color: #888; margin-bottom: 40px;">
+          A secure multi-chain cryptocurrency wallet
+        </p>
+        <button class="button" id="create-wallet-btn">Create New Wallet</button>
+        <button class="button button-secondary" id="import-wallet-btn">Import Existing Wallet</button>
+      </div>
+
+      <!-- Create Wallet Screen -->
+      <div id="create-wallet-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Create New Wallet</h2>
+
+        <div class="warning">
+          <strong>Important!</strong>
+          Your secret recovery phrase will be shown only once. Make sure to write it down and store it securely.
+        </div>
+
+        <div class="input-group">
+          <label for="create-password">Password</label>
+          <input type="password" id="create-password" placeholder="Enter a strong password">
+        </div>
+
+        <div class="input-group">
+          <label for="create-password-confirm">Confirm Password</label>
+          <input type="password" id="create-password-confirm" placeholder="Confirm your password">
+        </div>
+
+        <div id="create-error" class="error hidden"></div>
+
+        <button class="button" id="create-submit-btn">Create Wallet</button>
+        <button class="button button-secondary" id="create-back-btn">Back</button>
+      </div>
+
+      <!-- Show Mnemonic Screen -->
+      <div id="mnemonic-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Secret Recovery Phrase</h2>
+
+        <div class="warning">
+          <strong>Write this down!</strong>
+          This is the only way to recover your wallet. Never share it with anyone.
+        </div>
+
+        <div class="mnemonic-display" id="mnemonic-display"></div>
+
+        <button class="button" id="copy-mnemonic-btn">Copy to Clipboard</button>
+        <button class="button" id="mnemonic-continue-btn">I've Saved It</button>
+      </div>
+
+      <!-- Import Wallet Screen -->
+      <div id="import-wallet-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Import Wallet</h2>
+
+        <div class="input-group">
+          <label for="import-mnemonic">Secret Recovery Phrase</label>
+          <textarea id="import-mnemonic" placeholder="Enter your 12 or 24 word recovery phrase"></textarea>
+        </div>
+
+        <div class="input-group">
+          <label for="import-password">Password</label>
+          <input type="password" id="import-password" placeholder="Enter a password">
+        </div>
+
+        <div class="input-group">
+          <label for="import-password-confirm">Confirm Password</label>
+          <input type="password" id="import-password-confirm" placeholder="Confirm your password">
+        </div>
+
+        <div id="import-error" class="error hidden"></div>
+
+        <button class="button" id="import-submit-btn">Import Wallet</button>
+        <button class="button button-secondary" id="import-back-btn">Back</button>
+      </div>
+
+      <!-- Unlock Screen -->
+      <div id="unlock-screen" class="screen">
+        <h2 style="margin: 60px 0 40px; text-align: center;">Unlock Wallet</h2>
+
+        <div class="input-group">
+          <label for="unlock-password">Password</label>
+          <input type="password" id="unlock-password" placeholder="Enter your password">
+        </div>
+
+        <div id="unlock-error" class="error hidden"></div>
+
+        <button class="button" id="unlock-btn">Unlock</button>
+      </div>
+
+      <!-- Main Wallet Screen -->
+      <div id="wallet-screen" class="screen">
+        <div class="balance">
+          <div style="color: #888; font-size: 14px;">Balance</div>
+          <div class="balance-amount" id="balance-amount">0.00</div>
+          <div class="balance-usd" id="balance-symbol">ETH</div>
+        </div>
+
+        <div class="account" id="current-account">
+          <div class="account-info">
+            <div class="account-name">Account 1</div>
+            <div class="account-address" id="account-address">0x0000...0000</div>
+          </div>
+          <button class="copy-btn" id="copy-address-btn">Copy</button>
+        </div>
+
+        <div class="actions">
+          <div class="action-btn" id="send-btn">
+            <div class="action-btn-icon">↑</div>
+            <div class="action-btn-label">Send</div>
+          </div>
+          <div class="action-btn" id="receive-btn">
+            <div class="action-btn-icon">↓</div>
+            <div class="action-btn-label">Receive</div>
+          </div>
+        </div>
+
+        <div class="tabs">
+          <div class="tab active" data-tab="accounts">Accounts</div>
+          <div class="tab" data-tab="settings">Settings</div>
+        </div>
+
+        <div id="accounts-tab" class="tab-content">
+          <button class="button button-secondary" id="add-account-btn">Add Account</button>
+        </div>
+
+        <div id="settings-tab" class="tab-content hidden">
+          <button class="button button-secondary" id="lock-wallet-btn">Lock Wallet</button>
+          <button class="button button-secondary" id="show-mnemonic-btn">Show Recovery Phrase</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

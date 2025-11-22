@@ -30,6 +30,11 @@ export interface WalletState {
   currentNetwork: number;
 }
 
+export interface AddressSpoofConfig {
+  enabled: boolean;
+  spoofedAddress: string;
+}
+
 export class StorageService {
   private static readonly WALLET_KEY = "wallet";
   private static readonly NETWORKS_KEY = "networks";
@@ -37,6 +42,7 @@ export class StorageService {
   private static readonly STATE_KEY = "state";
   private static readonly SESSION_PASSWORD_KEY = "sessionPassword";
   private static readonly SESSION_MNEMONIC_KEY = "sessionMnemonic";
+  private static readonly ADDRESS_SPOOF_KEY = "addressSpoof";
 
   /**
    * Initialize wallet with mnemonic and password
@@ -466,5 +472,20 @@ export class StorageService {
         )
     );
     await chrome.storage.local.set({ [this.TOKENS_KEY]: filtered });
+  }
+
+  /**
+   * Get address spoof configuration
+   */
+  static async getAddressSpoofConfig(): Promise<AddressSpoofConfig> {
+    const result = await chrome.storage.local.get(this.ADDRESS_SPOOF_KEY);
+    return result[this.ADDRESS_SPOOF_KEY] || { enabled: false, spoofedAddress: "" };
+  }
+
+  /**
+   * Set address spoof configuration
+   */
+  static async setAddressSpoofConfig(config: AddressSpoofConfig): Promise<void> {
+    await chrome.storage.local.set({ [this.ADDRESS_SPOOF_KEY]: config });
   }
 }

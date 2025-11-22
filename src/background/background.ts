@@ -238,6 +238,12 @@ async function handleMessage(
     case 'REJECT_REQUEST':
       return await rejectRequest(payload.requestId, payload.reason);
 
+    case 'GET_ADDRESS_SPOOF_CONFIG':
+      return await StorageService.getAddressSpoofConfig();
+
+    case 'SET_ADDRESS_SPOOF_CONFIG':
+      return await StorageService.setAddressSpoofConfig(payload);
+
     default:
       throw new Error(`Unknown message type: ${type}`);
   }

@@ -29,6 +29,10 @@ class EthereumProvider {
   private requestId: number = 0;
   private pendingRequests: Map<number, { resolve: Function; reject: Function }> = new Map();
 
+  // Address spoofing
+  private realAddress: string | null = null;
+  private spoofConfig: { enabled: boolean; spoofedAddress: string } = { enabled: false, spoofedAddress: '' };
+
   constructor() {
     this.initialize();
   }
@@ -55,7 +59,32 @@ class EthereumProvider {
           }
         }
       }
+
+      // Listen for spoof config updates
+      if (event.data?.type === 'CRYPTO_WALLET_SPOOF_CONFIG_UPDATE') {
+        const oldConfig = this.spoofConfig;
+        this.spoofConfig = event.data.config;
+        console.log('[Crypto Wallet] Spoof config updated:', this.spoofConfig);
+
+        // If config changed and we have a real address, update selected address
+        if (this.realAddress) {
+          const newDisplayAddress = this.getDisplayAddress();
+          if (newDisplayAddress !== this.selectedAddress) {
+            this.selectedAddress = newDisplayAddress;
+            this.emit('accountsChanged', [this.selectedAddress]);
+            console.log('[Crypto Wallet] Display address changed to:', this.selectedAddress);
+          }
+        }
+      }
     });
+
+    // Fetch spoof config
+    try {
+      this.spoofConfig = await this.sendMessage('GET_ADDRESS_SPOOF_CONFIG');
+      console.log('[Crypto Wallet] Address spoof config:', this.spoofConfig);
+    } catch {
+      this.spoofConfig = { enabled: false, spoofedAddress: '' };
+    }
 
     // Fetch current network from wallet
     try {
@@ -113,6 +142,17 @@ class EthereumProvider {
   }
 
   /**
+   * Get the address to display to dApps (may be spoofed)
+   */
+  private getDisplayAddress(): string | null {
+    if (this.spoofConfig.enabled && this.spoofConfig.spoofedAddress) {
+      console.log('[Crypto Wallet] Using spoofed address:', this.spoofConfig.spoofedAddress, 'instead of real:', this.realAddress);
+      return this.spoofConfig.spoofedAddress;
+    }
+    return this.realAddress;
+  }
+
+  /**
    * EIP-1193: request method
    */
   async request(args: RequestArguments): Promise<unknown> {
@@ -122,10 +162,11 @@ class EthereumProvider {
       case 'eth_requestAccounts':
         const accounts = await this.sendMessage('REQUEST_ACCOUNTS');
         if (accounts && accounts.length > 0) {
-          this.selectedAddress = accounts[0];
-          this.emit('accountsChanged', accounts);
+          this.realAddress = accounts[0];
+          this.selectedAddress = this.getDisplayAddress();
+          this.emit('accountsChanged', [this.selectedAddress]);
         }
-        return accounts;
+        return this.selectedAddress ? [this.selectedAddress] : [];
 
       case 'eth_accounts':
         if (this.selectedAddress) {

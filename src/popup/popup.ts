@@ -143,6 +143,10 @@ function setupEventListeners() {
       }
     });
   });
+
+  // Address spoofing controls
+  document.getElementById('spoof-enabled-checkbox')?.addEventListener('change', handleSpoofEnabledChange);
+  document.getElementById('save-spoof-btn')?.addEventListener('click', handleSaveSpoofConfig);
 }
 
 /**
@@ -203,6 +207,11 @@ async function switchTab(tabName: string) {
   // Load tokens when switching to tokens tab
   if (tabName === 'tokens') {
     await loadTokens();
+  }
+
+  // Load spoof config when switching to settings tab
+  if (tabName === 'settings') {
+    await loadSpoofConfig();
   }
 }
 
@@ -921,6 +930,99 @@ async function handleRemoveToken(address: string, chainId: number) {
 
 // Make handleRemoveToken globally accessible
 (window as any).handleRemoveToken = handleRemoveToken;
+
+/**
+ * Load spoof config
+ */
+async function loadSpoofConfig() {
+  try {
+    const config = await sendMessage<{ enabled: boolean; spoofedAddress: string }>('GET_ADDRESS_SPOOF_CONFIG');
+
+    const enabledCheckbox = document.getElementById('spoof-enabled-checkbox') as HTMLInputElement;
+    const addressInput = document.getElementById('spoof-address') as HTMLInputElement;
+    const addressGroup = document.getElementById('spoof-address-group');
+    const saveBtn = document.getElementById('save-spoof-btn');
+
+    if (enabledCheckbox) {
+      enabledCheckbox.checked = config.enabled;
+    }
+
+    if (addressInput) {
+      addressInput.value = config.spoofedAddress || '';
+    }
+
+    // Show/hide address input based on enabled state
+    if (config.enabled) {
+      addressGroup?.style.setProperty('display', 'block');
+      saveBtn?.style.setProperty('display', 'block');
+    } else {
+      addressGroup?.style.setProperty('display', 'none');
+      saveBtn?.style.setProperty('display', 'none');
+    }
+  } catch (error) {
+    console.error('Failed to load spoof config:', error);
+  }
+}
+
+/**
+ * Handle spoof enabled change
+ */
+function handleSpoofEnabledChange() {
+  const enabledCheckbox = document.getElementById('spoof-enabled-checkbox') as HTMLInputElement;
+  const addressGroup = document.getElementById('spoof-address-group');
+  const saveBtn = document.getElementById('save-spoof-btn');
+
+  if (enabledCheckbox.checked) {
+    addressGroup?.style.setProperty('display', 'block');
+    saveBtn?.style.setProperty('display', 'block');
+  } else {
+    addressGroup?.style.setProperty('display', 'none');
+    saveBtn?.style.setProperty('display', 'block'); // Keep save button visible to save disabled state
+  }
+}
+
+/**
+ * Handle save spoof config
+ */
+async function handleSaveSpoofConfig() {
+  try {
+    const enabledCheckbox = document.getElementById('spoof-enabled-checkbox') as HTMLInputElement;
+    const addressInput = document.getElementById('spoof-address') as HTMLInputElement;
+
+    const config = {
+      enabled: enabledCheckbox.checked,
+      spoofedAddress: addressInput.value.trim()
+    };
+
+    // Validate address if enabled
+    if (config.enabled && !config.spoofedAddress) {
+      alert('Please enter a spoofed address');
+      return;
+    }
+
+    if (config.enabled && !config.spoofedAddress.startsWith('0x')) {
+      alert('Address must start with 0x');
+      return;
+    }
+
+    await sendMessage('SET_ADDRESS_SPOOF_CONFIG', config);
+
+    // Show success message
+    const saveBtn = document.getElementById('save-spoof-btn') as HTMLButtonElement;
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = '✓ Saved!';
+    saveBtn.style.background = '#28a745';
+
+    setTimeout(() => {
+      saveBtn.textContent = originalText || 'Save Spoofing Config';
+      saveBtn.style.background = '';
+    }, 2000);
+
+    console.log('Spoof config saved:', config);
+  } catch (error) {
+    alert('Failed to save: ' + (error as Error).message);
+  }
+}
 
 // Initialize on load
 document.addEventListener('DOMContentLoaded', initialize);

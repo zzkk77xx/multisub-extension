@@ -70,4 +70,17 @@ window.addEventListener('message', async (event) => {
   }
 });
 
+/**
+ * Listen for storage changes to broadcast config updates
+ */
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.addressSpoof) {
+    console.log('[Crypto Wallet] Spoof config changed, notifying page');
+    window.postMessage({
+      type: 'CRYPTO_WALLET_SPOOF_CONFIG_UPDATE',
+      config: changes.addressSpoof.newValue
+    }, '*');
+  }
+});
+
 console.log('Crypto Wallet content script loaded');

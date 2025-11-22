@@ -432,23 +432,71 @@ async function sendTransaction(payload: {
 
   const provider = new ethers.JsonRpcProvider(network.rpcUrl);
 
+  // Get the current account to use as 'from' if not provided
+  const currentAccount = await StorageService.getCurrentAccount();
+  if (!currentAccount) {
+    throw new Error('No account selected');
+  }
+
   // Prepare transaction with all required fields
   const transaction = {
     ...payload.transaction,
-    chainId: network.chainId
+    chainId: network.chainId,
+    from: payload.transaction.from || currentAccount.address // Ensure 'from' is set
   };
 
-  // Estimate gas if not provided
+  console.log('[Transaction] Received from dApp:', {
+    to: transaction.to,
+    value: transaction.value,
+    data: transaction.data ? `${(transaction.data.length - 2) / 2} bytes` : 'none',
+    gasLimit: transaction.gasLimit || 'not provided',
+    gas: (transaction as any).gas || 'not provided'
+  });
+
+  // Handle gas limit (check both 'gas' and 'gasLimit' fields)
+  // Normalize: some dApps use 'gas', ethers uses 'gasLimit'
+  const txAny = transaction as any;
+  if (txAny.gas && !transaction.gasLimit) {
+    transaction.gasLimit = txAny.gas;
+    delete txAny.gas;
+  }
+
+  // Only estimate gas if not provided by the dApp
   if (!transaction.gasLimit) {
+    console.log('[Gas] No gas limit provided, estimating...');
     try {
       const gasEstimate = await provider.estimateGas(transaction);
-      // Add 20% buffer to gas estimate
-      transaction.gasLimit = (gasEstimate * 120n) / 100n;
-    } catch (error) {
-      console.warn('Gas estimation failed, using default:', error);
-      // Default gas for simple transfer
-      transaction.gasLimit = 21000;
+      // Add 50% buffer for safety (Uniswap swaps can vary)
+      transaction.gasLimit = (gasEstimate * 150n) / 100n;
+      console.log('[Gas] Estimated:', gasEstimate.toString(), '→ With buffer:', transaction.gasLimit.toString());
+    } catch (error: any) {
+      console.warn('[Gas] Estimation failed:', error.message);
+
+      // Use intelligent defaults based on transaction complexity
+      if (transaction.data && transaction.data !== '0x') {
+        const dataLength = (transaction.data.length - 2) / 2; // bytes
+
+        if (dataLength > 1000) {
+          // Very complex transaction (like Uniswap multicall)
+          transaction.gasLimit = 500000;
+          console.log('[Gas] Using high default for complex transaction:', transaction.gasLimit);
+        } else if (dataLength > 100) {
+          // Medium complexity (normal DEX swap)
+          transaction.gasLimit = 300000;
+          console.log('[Gas] Using medium default for DEX transaction:', transaction.gasLimit);
+        } else {
+          // Simple contract call (ERC20 transfer)
+          transaction.gasLimit = 100000;
+          console.log('[Gas] Using low default for simple contract call:', transaction.gasLimit);
+        }
+      } else {
+        // Simple ETH transfer
+        transaction.gasLimit = 21000;
+        console.log('[Gas] Using default for ETH transfer:', transaction.gasLimit);
+      }
     }
+  } else {
+    console.log('[Gas] Using provided gas limit:', transaction.gasLimit.toString());
   }
 
   // Get gas price if not provided
@@ -470,8 +518,9 @@ async function sendTransaction(payload: {
   }
 
   // Get nonce if not provided
-  if (transaction.nonce === undefined && transaction.from) {
+  if (transaction.nonce === undefined) {
     transaction.nonce = await provider.getTransactionCount(transaction.from as string, 'latest');
+    console.log('Nonce fetched:', transaction.nonce);
   }
 
   const signedTx = await walletInstance.signTransaction(

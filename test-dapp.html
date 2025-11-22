@@ -250,6 +250,30 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Test Smart Contract - ERC20 Transfer</div>
+      <div class="input-group">
+        <label for="token-address">Adresse du token ERC20:</label>
+        <input type="text" id="token-address" placeholder="0x..." value="">
+      </div>
+      <div class="input-group">
+        <label for="token-recipient">Adresse destinataire:</label>
+        <input type="text" id="token-recipient" placeholder="0x..." value="0x0000000000000000000000000000000000000000">
+      </div>
+      <div class="input-group">
+        <label for="token-amount">Montant (tokens):</label>
+        <input type="text" id="token-amount" placeholder="1.0" value="1.0">
+      </div>
+      <div class="grid">
+        <button class="button button-secondary" onclick="getTokenBalance()" id="check-balance-btn" disabled>Vérifier Solde</button>
+        <button class="button" onclick="transferToken()" id="transfer-btn" disabled>Transférer Token</button>
+      </div>
+      <p style="color: #888; font-size: 12px; margin-top: 10px;">
+        Exemples de tokens testnet (Polygon Mumbai): USDC, DAI, etc.<br>
+        Note: Vous devez avoir des tokens de test dans votre wallet
+      </p>
+    </div>
+
+    <div class="section">
       <div class="section-title">Informations du Provider</div>
       <button class="button button-secondary" onclick="getProviderInfo()">Récupérer les infos</button>
     </div>
@@ -304,6 +328,8 @@
       document.getElementById('disconnect-btn').disabled = true;
       document.getElementById('sign-btn').disabled = true;
       document.getElementById('send-btn').disabled = true;
+      document.getElementById('check-balance-btn').disabled = true;
+      document.getElementById('transfer-btn').disabled = true;
       log('🔌 Déconnecté');
     }
 
@@ -322,7 +348,7 @@
           params: [message, currentAccount]
         });
 
-        log(`✅ Signature générée:\n${signature}`, 'success');
+        log(`✅ Signature générée:\n${signature.toString()}`, 'success');
       } catch (error) {
         log(`❌ Erreur: ${error.message}`, 'error');
       }
@@ -379,6 +405,111 @@
       }
     }
 
+    async function getTokenBalance() {
+      if (!currentAccount) {
+        log('❌ Connectez d\'abord votre wallet', 'error');
+        return;
+      }
+
+      try {
+        const tokenAddress = document.getElementById('token-address').value;
+        if (!tokenAddress || !tokenAddress.startsWith('0x')) {
+          log('❌ Adresse de token invalide', 'error');
+          return;
+        }
+
+        log(`🔍 Vérification du solde pour ${tokenAddress}...`);
+
+        // Encode balanceOf(address) call - function selector: 0x70a08231
+        const balanceOfData = '0x70a08231000000000000000000000000' + currentAccount.slice(2);
+
+        const balance = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: tokenAddress,
+            data: balanceOfData
+          }, 'latest']
+        });
+
+        // Get decimals
+        const decimalsData = '0x313ce567'; // decimals()
+        const decimalsResult = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: tokenAddress,
+            data: decimalsData
+          }, 'latest']
+        });
+
+        const decimals = parseInt(decimalsResult, 16);
+        const balanceNum = parseInt(balance, 16);
+        const formattedBalance = (balanceNum / Math.pow(10, decimals)).toFixed(6);
+
+        log(`✅ Solde: ${formattedBalance} tokens (${balanceNum} wei)\nDecimals: ${decimals}`, 'success');
+      } catch (error) {
+        log(`❌ Erreur: ${error.message}`, 'error');
+      }
+    }
+
+    async function transferToken() {
+      if (!currentAccount) {
+        log('❌ Connectez d\'abord votre wallet', 'error');
+        return;
+      }
+
+      try {
+        const tokenAddress = document.getElementById('token-address').value;
+        const recipient = document.getElementById('token-recipient').value;
+        const amount = document.getElementById('token-amount').value;
+
+        if (!tokenAddress || !tokenAddress.startsWith('0x')) {
+          log('❌ Adresse de token invalide', 'error');
+          return;
+        }
+
+        if (!recipient || !recipient.startsWith('0x')) {
+          log('❌ Adresse destinataire invalide', 'error');
+          return;
+        }
+
+        log(`📤 Transfert de ${amount} tokens vers ${recipient}...`);
+
+        // Get token decimals first
+        const decimalsData = '0x313ce567'; // decimals()
+        const decimalsResult = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: tokenAddress,
+            data: decimalsData
+          }, 'latest']
+        });
+
+        const decimals = parseInt(decimalsResult, 16);
+        const amountInWei = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
+
+        // ERC20 transfer function signature: transfer(address,uint256)
+        // Function selector: 0xa9059cbb
+        const transferData =
+          '0xa9059cbb' +
+          recipient.slice(2).padStart(64, '0') +
+          amountInWei.toString(16).padStart(64, '0');
+
+        const txHash = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: currentAccount,
+            to: tokenAddress,
+            data: transferData,
+            value: '0x0'
+          }]
+        });
+
+        log(`✅ Transaction envoyée!\nHash: ${txHash}\nMontant: ${amount} tokens\nDestinataire: ${recipient}`, 'success');
+      } catch (error) {
+        log(`❌ Erreur: ${error.message}`, 'error');
+      }
+    }
+
     function handleAccountsChanged(accounts) {
       if (accounts.length === 0) {
         disconnect();
@@ -390,6 +521,8 @@
         document.getElementById('disconnect-btn').disabled = false;
         document.getElementById('sign-btn').disabled = false;
         document.getElementById('send-btn').disabled = false;
+        document.getElementById('check-balance-btn').disabled = false;
+        document.getElementById('transfer-btn').disabled = false;
         log(`🔄 Compte changé: ${currentAccount}`);
       }
     }

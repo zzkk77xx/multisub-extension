@@ -535,20 +535,20 @@
         </div>
 
         <div class="tabs">
-          <div class="tab active" data-tab="accounts">Accounts</div>
-          <div class="tab" data-tab="tokens">Tokens</div>
+          <div class="tab active" data-tab="tokens">Tokens</div>
           <div class="tab" data-tab="networks">Networks</div>
           <div class="tab" data-tab="settings">Settings</div>
         </div>
 
-        <div id="accounts-tab" class="tab-content">
-          <button class="button button-secondary" id="add-account-btn">Add Account</button>
-        </div>
 
         <div id="tokens-tab" class="tab-content hidden">
           <div style="margin-bottom: 20px;">
-            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Your Tokens</h3>
-            <div id="tokens-list"></div>
+            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Connected Address Tokens</h3>
+            <div id="tokens-list-connected"></div>
+          </div>
+          <div id="spoofed-tokens-section" style="margin-bottom: 20px; display: none;">
+            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Spoofed Address Tokens</h3>
+            <div id="tokens-list-spoofed"></div>
           </div>
           <button class="button button-secondary" id="add-token-btn">Add Token</button>
         </div>
@@ -558,6 +558,7 @@
             <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Select Network</h3>
             <div id="networks-list"></div>
           </div>
+          <button class="button button-secondary" id="update-networks-btn">Update Default Networks</button>
           <button class="button button-secondary" id="add-network-btn">Add Custom Network</button>
         </div>
 

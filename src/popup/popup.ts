@@ -107,6 +107,7 @@ function setupEventListeners() {
   });
 
   // Network management
+  document.getElementById('update-networks-btn')?.addEventListener('click', handleUpdateDefaultNetworks);
   document.getElementById('add-network-btn')?.addEventListener('click', () => {
     showScreen('add-network-screen');
   });
@@ -655,6 +656,19 @@ async function handleNetworkSwitch(networkIndex: number) {
 }
 
 /**
+ * Update default networks
+ */
+async function handleUpdateDefaultNetworks() {
+  try {
+    await sendMessage('UPDATE_DEFAULT_NETWORKS');
+    await loadNetworks();
+    showSuccess('Default networks updated successfully!');
+  } catch (error) {
+    showError((error as Error).message);
+  }
+}
+
+/**
  * Handle add custom network
  */
 async function handleAddNetwork() {
@@ -777,9 +791,10 @@ async function copyMnemonicView() {
  */
 async function loadTokens() {
   try {
-    const [currentNetwork, currentAccount] = await Promise.all([
+    const [currentNetwork, currentAccount, spoofConfig] = await Promise.all([
       sendMessage<any>('GET_CURRENT_NETWORK'),
-      sendMessage<any>('GET_CURRENT_ACCOUNT')
+      sendMessage<any>('GET_CURRENT_ACCOUNT'),
+      sendMessage<{ enabled: boolean; spoofedAddress: string }>('GET_ADDRESS_SPOOF_CONFIG')
     ]);
 
     if (!currentNetwork || !currentAccount) {
@@ -790,18 +805,34 @@ async function loadTokens() {
       chainId: currentNetwork.chainId
     });
 
-    const tokensList = document.getElementById('tokens-list');
-    if (!tokensList) return;
+    const tokensListConnected = document.getElementById('tokens-list-connected');
+    const tokensListSpoofed = document.getElementById('tokens-list-spoofed');
+    const spoofedSection = document.getElementById('spoofed-tokens-section');
+
+    if (!tokensListConnected) return;
+
+    // Show/hide spoofed section based on config
+    if (spoofConfig.enabled && spoofConfig.spoofedAddress && spoofedSection) {
+      spoofedSection.style.display = 'block';
+    } else if (spoofedSection) {
+      spoofedSection.style.display = 'none';
+    }
 
     if (tokens.length === 0) {
-      tokensList.innerHTML = '<div style="text-align: center; padding: 20px; color: #888; font-size: 13px;">No tokens added yet. Click "Add Token" to get started.</div>';
+      tokensListConnected.innerHTML = '<div style="text-align: center; padding: 20px; color: #888; font-size: 13px;">No tokens added yet. Click "Add Token" to get started.</div>';
+      if (tokensListSpoofed) {
+        tokensListSpoofed.innerHTML = '';
+      }
       return;
     }
 
-    tokensList.innerHTML = '<div style="font-size: 12px; color: #888; margin-bottom: 10px;">Loading balances...</div>';
+    tokensListConnected.innerHTML = '<div style="font-size: 12px; color: #888; margin-bottom: 10px;">Loading balances...</div>';
+    if (tokensListSpoofed) {
+      tokensListSpoofed.innerHTML = '<div style="font-size: 12px; color: #888; margin-bottom: 10px;">Loading balances...</div>';
+    }
 
-    // Load token balances
-    const tokenElements: string[] = [];
+    // Load token balances for connected address
+    const connectedTokenElements: string[] = [];
     for (const token of tokens) {
       try {
         const balance = await sendMessage<{ balance: string; formatted: string }>('GET_TOKEN_BALANCE', {
@@ -812,7 +843,7 @@ async function loadTokens() {
         const shortAddress = `${token.address.slice(0, 6)}...${token.address.slice(-4)}`;
         const formattedBalance = parseFloat(balance.formatted).toFixed(4);
 
-        tokenElements.push(`
+        connectedTokenElements.push(`
           <div class="token-item">
             <div class="token-item-info">
               <div class="token-item-name">${token.name} (${token.symbol})</div>
@@ -830,7 +861,40 @@ async function loadTokens() {
       }
     }
 
-    tokensList.innerHTML = tokenElements.join('');
+    tokensListConnected.innerHTML = connectedTokenElements.join('');
+
+    // Load token balances for spoofed address if enabled
+    if (spoofConfig.enabled && spoofConfig.spoofedAddress && tokensListSpoofed) {
+      const spoofedTokenElements: string[] = [];
+      for (const token of tokens) {
+        try {
+          const balance = await sendMessage<{ balance: string; formatted: string }>('GET_TOKEN_BALANCE', {
+            tokenAddress: token.address,
+            walletAddress: spoofConfig.spoofedAddress
+          });
+
+          const shortAddress = `${token.address.slice(0, 6)}...${token.address.slice(-4)}`;
+          const formattedBalance = parseFloat(balance.formatted).toFixed(4);
+
+          spoofedTokenElements.push(`
+            <div class="token-item">
+              <div class="token-item-info">
+                <div class="token-item-name">${token.name} (${token.symbol})</div>
+                <div class="token-item-address">${shortAddress}</div>
+              </div>
+              <div class="token-item-balance">
+                <div class="token-item-amount">${formattedBalance}</div>
+                <div class="token-item-symbol">${token.symbol}</div>
+              </div>
+            </div>
+          `);
+        } catch (error) {
+          console.error(`Failed to load spoofed balance for ${token.symbol}:`, error);
+        }
+      }
+
+      tokensListSpoofed.innerHTML = spoofedTokenElements.join('');
+    }
   } catch (error) {
     console.error('Failed to load tokens:', error);
   }

@@ -292,6 +292,80 @@ export class StorageService {
         blockExplorerUrl: "https://polygonscan.com",
       },
       {
+        chainId: 42161,
+        name: "Arbitrum One",
+        rpcUrl: "https://arb1.arbitrum.io/rpc",
+        symbol: "ETH",
+        blockExplorerUrl: "https://arbiscan.io",
+      },
+      {
+        chainId: 8453,
+        name: "Base",
+        rpcUrl: "https://mainnet.base.org",
+        symbol: "ETH",
+        blockExplorerUrl: "https://basescan.org",
+      },
+      {
+        chainId: 48900,
+        name: "Zircuit",
+        rpcUrl: "https://zircuit1-mainnet.p2pify.com",
+        symbol: "ETH",
+        blockExplorerUrl: "https://explorer.zircuit.com",
+      },
+      {
+        chainId: 14,
+        name: "Flare",
+        rpcUrl: "https://flare-api.flare.network/ext/C/rpc",
+        symbol: "FLR",
+        blockExplorerUrl: "https://flare-explorer.flare.network",
+      },
+      {
+        chainId: 43114,
+        name: "Avalanche C-Chain",
+        rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+        symbol: "AVAX",
+        blockExplorerUrl: "https://snowtrace.io",
+      },
+      {
+        chainId: 11155111,
+        name: "Sepolia Testnet",
+        rpcUrl: "https://rpc.sepolia.org",
+        symbol: "ETH",
+        blockExplorerUrl: "https://sepolia.etherscan.io",
+      },
+    ];
+
+    await chrome.storage.local.set({ [this.NETWORKS_KEY]: defaultNetworks });
+  }
+
+  /**
+   * Get all networks
+   */
+  static async getNetworks(): Promise<Network[]> {
+    const result = await chrome.storage.local.get(this.NETWORKS_KEY);
+    return result[this.NETWORKS_KEY] || [];
+  }
+
+  /**
+   * Merge new default networks with existing networks
+   */
+  static async updateDefaultNetworks(): Promise<void> {
+    const defaultNetworks: Network[] = [
+      {
+        chainId: 1,
+        name: "Ethereum Mainnet",
+        rpcUrl: "https://eth.llamarpc.com",
+        symbol: "ETH",
+        blockExplorerUrl: "https://etherscan.io",
+      },
+      {
+        chainId: 137,
+        name: "Polygon",
+        rpcUrl: "https://polygon-rpc.com",
+        symbol: "POL",
+        blockExplorerUrl: "https://polygonscan.com",
+      },
+      {
         chainId: 56,
         name: "BNB Smart Chain",
         rpcUrl: "https://bsc-dataseed.binance.org",
@@ -320,6 +394,20 @@ export class StorageService {
         blockExplorerUrl: "https://basescan.org",
       },
       {
+        chainId: 48900,
+        name: "Zircuit",
+        rpcUrl: "https://zircuit1-mainnet.p2pify.com",
+        symbol: "ETH",
+        blockExplorerUrl: "https://explorer.zircuit.com",
+      },
+      {
+        chainId: 14,
+        name: "Flare",
+        rpcUrl: "https://flare-api.flare.network/ext/C/rpc",
+        symbol: "FLR",
+        blockExplorerUrl: "https://flare-explorer.flare.network",
+      },
+      {
         chainId: 43114,
         name: "Avalanche C-Chain",
         rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
@@ -342,15 +430,18 @@ export class StorageService {
       },
     ];
 
-    await chrome.storage.local.set({ [this.NETWORKS_KEY]: defaultNetworks });
-  }
+    const existingNetworks = await this.getNetworks();
+    const existingChainIds = new Set(existingNetworks.map(n => n.chainId));
 
-  /**
-   * Get all networks
-   */
-  static async getNetworks(): Promise<Network[]> {
-    const result = await chrome.storage.local.get(this.NETWORKS_KEY);
-    return result[this.NETWORKS_KEY] || [];
+    // Add only networks that don't already exist
+    const networksToAdd = defaultNetworks.filter(
+      n => !existingChainIds.has(n.chainId)
+    );
+
+    if (networksToAdd.length > 0) {
+      const updatedNetworks = [...existingNetworks, ...networksToAdd];
+      await chrome.storage.local.set({ [this.NETWORKS_KEY]: updatedNetworks });
+    }
   }
 
   /**
@@ -479,13 +570,17 @@ export class StorageService {
    */
   static async getAddressSpoofConfig(): Promise<AddressSpoofConfig> {
     const result = await chrome.storage.local.get(this.ADDRESS_SPOOF_KEY);
-    return result[this.ADDRESS_SPOOF_KEY] || { enabled: false, spoofedAddress: "" };
+    return (
+      result[this.ADDRESS_SPOOF_KEY] || { enabled: false, spoofedAddress: "" }
+    );
   }
 
   /**
    * Set address spoof configuration
    */
-  static async setAddressSpoofConfig(config: AddressSpoofConfig): Promise<void> {
+  static async setAddressSpoofConfig(
+    config: AddressSpoofConfig
+  ): Promise<void> {
     await chrome.storage.local.set({ [this.ADDRESS_SPOOF_KEY]: config });
   }
 }

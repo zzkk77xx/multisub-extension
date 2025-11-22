@@ -244,6 +244,9 @@ async function handleMessage(
     case 'SET_ADDRESS_SPOOF_CONFIG':
       return await StorageService.setAddressSpoofConfig(payload);
 
+    case 'UPDATE_DEFAULT_NETWORKS':
+      return await StorageService.updateDefaultNetworks();
+
     default:
       throw new Error(`Unknown message type: ${type}`);
   }

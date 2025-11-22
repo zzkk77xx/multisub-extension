@@ -36,6 +36,7 @@ export class StorageService {
   private static readonly TOKENS_KEY = "tokens";
   private static readonly STATE_KEY = "state";
   private static readonly SESSION_PASSWORD_KEY = "sessionPassword";
+  private static readonly SESSION_MNEMONIC_KEY = "sessionMnemonic";
 
   /**
    * Initialize wallet with mnemonic and password
@@ -56,6 +57,18 @@ export class StorageService {
     };
 
     await chrome.storage.local.set({ [this.WALLET_KEY]: wallet });
+
+    // Store mnemonic in session storage so wallet survives service worker restarts
+    const sessionPassword = CryptoService.generateSessionPassword();
+    const sessionEncryptedMnemonic = await CryptoService.encrypt(
+      mnemonic,
+      sessionPassword
+    );
+
+    await chrome.storage.session.set({
+      [this.SESSION_PASSWORD_KEY]: sessionPassword,
+      [this.SESSION_MNEMONIC_KEY]: sessionEncryptedMnemonic,
+    });
 
     // Initialize default state
     await this.setState({
@@ -96,16 +109,24 @@ export class StorageService {
         password
       );
 
-      // Store session password in memory (session storage)
+      // Store session password and encrypted mnemonic in session storage
+      // This allows wallet to survive service worker restarts while session is active
       const sessionPassword = CryptoService.generateSessionPassword();
+      const sessionEncryptedMnemonic = await CryptoService.encrypt(
+        mnemonic,
+        sessionPassword
+      );
+
       await chrome.storage.session.set({
         [this.SESSION_PASSWORD_KEY]: sessionPassword,
+        [this.SESSION_MNEMONIC_KEY]: sessionEncryptedMnemonic,
       });
 
+      const state = await this.getState();
       await this.setState({
         isLocked: false,
-        currentAccount: 0,
-        currentNetwork: 0,
+        currentAccount: state?.currentAccount ?? 0,
+        currentNetwork: state?.currentNetwork ?? 0,
       });
 
       return mnemonic;
@@ -118,12 +139,15 @@ export class StorageService {
    * Lock wallet
    */
   static async lockWallet(): Promise<void> {
-    await chrome.storage.session.remove(this.SESSION_PASSWORD_KEY);
-    await this.setState({
-      isLocked: true,
-      currentAccount: 0,
-      currentNetwork: 0,
-    });
+    await chrome.storage.session.remove([
+      this.SESSION_PASSWORD_KEY,
+      this.SESSION_MNEMONIC_KEY,
+    ]);
+    const state = await this.getState();
+    if (state) {
+      state.isLocked = true;
+      await this.setState(state);
+    }
   }
 
   /**
@@ -133,10 +157,49 @@ export class StorageService {
     const state = await this.getState();
     if (!state) return true;
 
-    const sessionData = await chrome.storage.session.get(
-      this.SESSION_PASSWORD_KEY
+    const sessionData = await chrome.storage.session.get([
+      this.SESSION_PASSWORD_KEY,
+      this.SESSION_MNEMONIC_KEY,
+    ]);
+    return (
+      !sessionData[this.SESSION_PASSWORD_KEY] ||
+      !sessionData[this.SESSION_MNEMONIC_KEY] ||
+      state.isLocked
     );
-    return !sessionData[this.SESSION_PASSWORD_KEY] || state.isLocked;
+  }
+
+  /**
+   * Get decrypted mnemonic from session storage (if unlocked)
+   * This allows wallet instance to be restored after service worker restart
+   */
+  static async getSessionMnemonic(): Promise<string | null> {
+    const isLocked = await this.isLocked();
+    if (isLocked) {
+      return null;
+    }
+
+    try {
+      const sessionData = await chrome.storage.session.get([
+        this.SESSION_PASSWORD_KEY,
+        this.SESSION_MNEMONIC_KEY,
+      ]);
+
+      const sessionPassword = sessionData[this.SESSION_PASSWORD_KEY];
+      const sessionEncryptedMnemonic = sessionData[this.SESSION_MNEMONIC_KEY];
+
+      if (!sessionPassword || !sessionEncryptedMnemonic) {
+        return null;
+      }
+
+      const mnemonic = await CryptoService.decrypt(
+        sessionEncryptedMnemonic,
+        sessionPassword
+      );
+      return mnemonic;
+    } catch (error) {
+      console.error("Failed to retrieve session mnemonic:", error);
+      return null;
+    }
   }
 
   /**

@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A secure cryptocurrency wallet Chrome extension with multi-chain support",
   "scripts": {
-    "build": "npm run icons && webpack --mode production",
+    "build": "webpack --mode production",
     "dev": "webpack --mode development --watch",
     "test": "jest",
     "icons": "node generate-icons.js"

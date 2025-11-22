@@ -52,9 +52,22 @@ class EthereumProvider {
       }
     });
 
-    // Set default chain (Ethereum mainnet)
-    this.chainId = '0x1';
-    this.networkVersion = '1';
+    // Fetch current network from wallet
+    try {
+      const network = await this.sendMessage('GET_CURRENT_NETWORK');
+      if (network) {
+        this.chainId = '0x' + network.chainId.toString(16);
+        this.networkVersion = network.chainId.toString();
+      } else {
+        // Fallback to Ethereum mainnet
+        this.chainId = '0x1';
+        this.networkVersion = '1';
+      }
+    } catch {
+      // Fallback to Ethereum mainnet if fetch fails
+      this.chainId = '0x1';
+      this.networkVersion = '1';
+    }
   }
 
   /**

@@ -5,6 +5,19 @@ import { ethers } from 'ethers';
 // In-memory wallet instance (cleared when locked)
 let walletInstance: Wallet | null = null;
 
+// Pending requests from DApps
+interface PendingRequest {
+  id: string;
+  type: 'signature' | 'transaction';
+  payload: any;
+  sender: chrome.runtime.MessageSender;
+  timestamp: number;
+  resolve: (value: any) => void;
+  reject: (error: Error) => void;
+}
+
+const pendingRequests = new Map<string, PendingRequest>();
+
 interface Message {
   type: string;
   payload?: any;
@@ -14,6 +27,26 @@ interface MessageResponse {
   success: boolean;
   data?: any;
   error?: string;
+}
+
+/**
+ * Ensure wallet instance is initialized if session is unlocked
+ * This is needed because service workers can be terminated and restarted
+ */
+async function ensureWalletInstance(): Promise<void> {
+  // If we already have an instance, nothing to do
+  if (walletInstance) {
+    return;
+  }
+
+  // Try to restore wallet from session storage
+  const mnemonic = await StorageService.getSessionMnemonic();
+  if (mnemonic) {
+    const wallet = new Wallet();
+    await wallet.fromMnemonic(mnemonic);
+    walletInstance = wallet;
+    console.log('Wallet instance restored from session');
+  }
 }
 
 /**
@@ -53,6 +86,9 @@ async function handleMessage(
   message: Message,
   sender: chrome.runtime.MessageSender
 ): Promise<any> {
+  // Ensure wallet instance is restored if session is active
+  await ensureWalletInstance();
+
   const { type, payload } = message;
 
   switch (type) {
@@ -174,6 +210,21 @@ async function handleMessage(
     case 'REQUEST_ACCOUNTS':
       return await requestAccounts(sender);
 
+    case 'GET_PENDING_REQUESTS':
+      return Array.from(pendingRequests.values()).map(req => ({
+        id: req.id,
+        type: req.type,
+        payload: req.payload,
+        sender: req.sender.url,
+        timestamp: req.timestamp
+      }));
+
+    case 'APPROVE_REQUEST':
+      return await approveRequest(payload.requestId);
+
+    case 'REJECT_REQUEST':
+      return await rejectRequest(payload.requestId, payload.reason);
+
     default:
       throw new Error(`Unknown message type: ${type}`);
   }
@@ -186,6 +237,9 @@ async function handleExternalMessage(
   message: Message,
   sender: chrome.runtime.MessageSender
 ): Promise<any> {
+  // Ensure wallet instance is restored if session is active
+  await ensureWalletInstance();
+
   const { type, payload } = message;
 
   // Verify sender origin
@@ -332,8 +386,19 @@ async function signTransaction(payload: {
     throw new Error('Wallet is locked');
   }
 
+  // Ensure transaction has the correct chain ID
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  const transaction = {
+    ...payload.transaction,
+    chainId: network.chainId
+  };
+
   const signedTx = await walletInstance.signTransaction(
-    payload.transaction,
+    transaction,
     payload.path
   );
 
@@ -357,8 +422,51 @@ async function sendTransaction(payload: {
   }
 
   const provider = new ethers.JsonRpcProvider(network.rpcUrl);
+
+  // Prepare transaction with all required fields
+  const transaction = {
+    ...payload.transaction,
+    chainId: network.chainId
+  };
+
+  // Estimate gas if not provided
+  if (!transaction.gasLimit) {
+    try {
+      const gasEstimate = await provider.estimateGas(transaction);
+      // Add 20% buffer to gas estimate
+      transaction.gasLimit = (gasEstimate * 120n) / 100n;
+    } catch (error) {
+      console.warn('Gas estimation failed, using default:', error);
+      // Default gas for simple transfer
+      transaction.gasLimit = 21000;
+    }
+  }
+
+  // Get gas price if not provided
+  if (!transaction.gasPrice && !transaction.maxFeePerGas) {
+    try {
+      const feeData = await provider.getFeeData();
+      if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
+        // EIP-1559 transaction
+        transaction.maxFeePerGas = feeData.maxFeePerGas;
+        transaction.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas;
+        transaction.type = 2;
+      } else if (feeData.gasPrice) {
+        // Legacy transaction
+        transaction.gasPrice = feeData.gasPrice;
+      }
+    } catch (error) {
+      console.warn('Failed to get gas price:', error);
+    }
+  }
+
+  // Get nonce if not provided
+  if (transaction.nonce === undefined && transaction.from) {
+    transaction.nonce = await provider.getTransactionCount(transaction.from as string, 'latest');
+  }
+
   const signedTx = await walletInstance.signTransaction(
-    payload.transaction,
+    transaction,
     payload.path
   );
 
@@ -396,9 +504,8 @@ async function requestAccounts(sender: chrome.runtime.MessageSender) {
  */
 async function requestSignature(
   payload: { message: string },
-  sender: chrome.runtime.MessageSender
-) {
-  // In production, show a confirmation popup
+  _sender: chrome.runtime.MessageSender
+): Promise<string> {
   const currentAccount = await StorageService.getCurrentAccount();
   if (!currentAccount) {
     throw new Error('No account selected');
@@ -408,12 +515,56 @@ async function requestSignature(
     throw new Error('Wallet is locked');
   }
 
+  // For now, auto-approve signatures (TODO: implement confirmation UI)
+  console.log('Auto-approving signature request for:', payload.message);
   const signature = await walletInstance.signMessage(
     payload.message,
     currentAccount.derivationPath
   );
 
   return signature;
+
+  /* TODO: Implement confirmation popup
+  // Create pending request
+  const requestId = `sig_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(requestId, {
+      id: requestId,
+      type: 'signature',
+      payload: {
+        message: payload.message,
+        account: currentAccount.address
+      },
+      sender,
+      timestamp: Date.now(),
+      resolve,
+      reject
+    });
+
+    // Open popup for confirmation
+    chrome.windows.create({
+      url: chrome.runtime.getURL('popup.html?request=' + requestId),
+      type: 'popup',
+      width: 400,
+      height: 600
+    }, (window) => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to open confirmation popup:', chrome.runtime.lastError);
+        pendingRequests.delete(requestId);
+        reject(new Error('Failed to open confirmation popup'));
+      }
+    });
+
+    // Set timeout for request (5 minutes)
+    setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        reject(new Error('Request timeout'));
+      }
+    }, 5 * 60 * 1000);
+  });
+  */
 }
 
 /**
@@ -421,20 +572,134 @@ async function requestSignature(
  */
 async function requestTransaction(
   payload: { transaction: ethers.TransactionRequest },
-  sender: chrome.runtime.MessageSender
-) {
-  // In production, show a confirmation popup
+  _sender: chrome.runtime.MessageSender
+): Promise<string> {
   const currentAccount = await StorageService.getCurrentAccount();
   if (!currentAccount) {
     throw new Error('No account selected');
   }
 
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  // For now, auto-approve transactions (TODO: implement confirmation UI)
+  console.log('Auto-approving transaction request for:', payload.transaction);
   const result = await sendTransaction({
     transaction: payload.transaction,
     path: currentAccount.derivationPath
   });
 
   return result.hash;
+
+  /* TODO: Implement confirmation popup
+  // Create pending request
+  const requestId = `tx_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  return new Promise((resolve, reject) => {
+    pendingRequests.set(requestId, {
+      id: requestId,
+      type: 'transaction',
+      payload: {
+        transaction: payload.transaction,
+        account: currentAccount.address,
+        network: network.name,
+        chainId: network.chainId
+      },
+      sender,
+      timestamp: Date.now(),
+      resolve,
+      reject
+    });
+
+    // Open popup for confirmation
+    chrome.windows.create({
+      url: chrome.runtime.getURL('popup.html?request=' + requestId),
+      type: 'popup',
+      width: 400,
+      height: 600
+    }, (window) => {
+      if (chrome.runtime.lastError) {
+        console.error('Failed to open confirmation popup:', chrome.runtime.lastError);
+        pendingRequests.delete(requestId);
+        reject(new Error('Failed to open confirmation popup'));
+      }
+    });
+
+    // Set timeout for request (5 minutes)
+    setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        reject(new Error('Request timeout'));
+      }
+    }, 5 * 60 * 1000);
+  });
+  */
+}
+
+/**
+ * Approve a pending request
+ */
+async function approveRequest(requestId: string) {
+  const request = pendingRequests.get(requestId);
+  if (!request) {
+    throw new Error('Request not found');
+  }
+
+  try {
+    const currentAccount = await StorageService.getCurrentAccount();
+    if (!currentAccount) {
+      throw new Error('No account selected');
+    }
+
+    if (!walletInstance) {
+      throw new Error('Wallet is locked');
+    }
+
+    let result: any;
+
+    if (request.type === 'signature') {
+      // Sign the message
+      const signature = await walletInstance.signMessage(
+        request.payload.message,
+        currentAccount.derivationPath
+      );
+      result = signature;
+    } else if (request.type === 'transaction') {
+      // Send the transaction
+      const txResult = await sendTransaction({
+        transaction: request.payload.transaction,
+        path: currentAccount.derivationPath
+      });
+      result = txResult.hash;
+    }
+
+    // Resolve the pending request
+    request.resolve(result);
+    pendingRequests.delete(requestId);
+
+    return { approved: true, result };
+  } catch (error: any) {
+    request.reject(error);
+    pendingRequests.delete(requestId);
+    throw error;
+  }
+}
+
+/**
+ * Reject a pending request
+ */
+async function rejectRequest(requestId: string, reason?: string) {
+  const request = pendingRequests.get(requestId);
+  if (!request) {
+    throw new Error('Request not found');
+  }
+
+  request.reject(new Error(reason || 'User rejected the request'));
+  pendingRequests.delete(requestId);
+
+  return { rejected: true };
 }
 
 /**

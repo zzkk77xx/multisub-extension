@@ -173,10 +173,12 @@ async function handleMessage(
         if (!currentAccount.derivationPath) {
           throw new Error('Account derivation path not found');
         }
-        return await sendTransaction({
+        const result = await sendTransaction({
           transaction: payload,
           path: currentAccount.derivationPath
         });
+        // EIP-1193: eth_sendTransaction must return ONLY the transaction hash
+        return result.hash;
       } else if (!payload.path) {
         const currentAccount = await StorageService.getCurrentAccount();
         if (!currentAccount) {
@@ -187,7 +189,9 @@ async function handleMessage(
         }
         payload.path = currentAccount.derivationPath;
       }
-      return await sendTransaction(payload);
+      const result = await sendTransaction(payload);
+      // EIP-1193: eth_sendTransaction must return ONLY the transaction hash
+      return result.hash;
 
     case 'GET_MNEMONIC':
       return await getMnemonic();
@@ -445,10 +449,11 @@ async function sendTransaction(payload: {
     from: payload.transaction.from || currentAccount.address // Ensure 'from' is set
   };
 
+  const dataSize = transaction.data ? (transaction.data.length - 2) / 2 : 0;
   console.log('[Transaction] Received from dApp:', {
     to: transaction.to,
     value: transaction.value,
-    data: transaction.data ? `${(transaction.data.length - 2) / 2} bytes` : 'none',
+    dataSize: dataSize > 0 ? `${dataSize} bytes` : 'none',
     gasLimit: transaction.gasLimit || 'not provided',
     gas: (transaction as any).gas || 'not provided'
   });
@@ -528,7 +533,9 @@ async function sendTransaction(payload: {
     payload.path
   );
 
+  console.log('[Transaction] Signed, broadcasting...');
   const txResponse = await provider.broadcastTransaction(signedTx);
+  console.log('[Transaction] Broadcast successful! Hash:', txResponse.hash);
 
   return {
     hash: txResponse.hash,

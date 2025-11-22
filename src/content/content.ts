@@ -3,14 +3,34 @@
  * Runs in an isolated world with access to chrome APIs
  */
 
-// Inject the provider script into the page
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.onload = function() {
-  // Clean up after injection
-  script.remove();
-};
-(document.head || document.documentElement).appendChild(script);
+console.log('[Crypto Wallet] Content script starting...');
+
+// Inject the provider script into the page ASAP
+function injectProvider() {
+  try {
+    const script = document.createElement('script');
+    script.src = chrome.runtime.getURL('inject.js');
+    script.onload = function() {
+      console.log('[Crypto Wallet] Provider script loaded');
+      script.remove();
+    };
+    script.onerror = function(error) {
+      console.error('[Crypto Wallet] Failed to load provider script:', error);
+    };
+
+    const target = document.head || document.documentElement;
+    if (target) {
+      target.insertBefore(script, target.firstChild);
+    } else {
+      console.error('[Crypto Wallet] No injection target found');
+    }
+  } catch (error) {
+    console.error('[Crypto Wallet] Injection error:', error);
+  }
+}
+
+// Inject immediately
+injectProvider();
 
 /**
  * Listen for messages from the injected script

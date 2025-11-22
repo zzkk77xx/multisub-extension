@@ -210,6 +210,15 @@ async function handleMessage(
     case 'REQUEST_ACCOUNTS':
       return await requestAccounts(sender);
 
+    case 'RPC_CALL':
+      return await handleRpcCall(payload);
+
+    case 'SWITCH_CHAIN':
+      return await handleSwitchChain(payload.chainId);
+
+    case 'ADD_CHAIN':
+      return await handleAddChain(payload.chainParams);
+
     case 'GET_PENDING_REQUESTS':
       return Array.from(pendingRequests.values()).map(req => ({
         id: req.id,
@@ -752,6 +761,94 @@ async function getTokenBalance(tokenAddress: string, walletAddress: string) {
       formatted: '0'
     };
   }
+}
+
+/**
+ * Handle RPC calls (read-only methods forwarded to current network)
+ */
+async function handleRpcCall(payload: { method: string; params?: any[] }) {
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  const provider = new ethers.JsonRpcProvider(network.rpcUrl);
+
+  try {
+    // Forward the RPC call to the provider
+    const result = await provider.send(payload.method, payload.params || []);
+    return result;
+  } catch (error: any) {
+    console.error('RPC call failed:', error);
+    throw new Error(error.message || 'RPC call failed');
+  }
+}
+
+/**
+ * Handle chain switching request
+ */
+async function handleSwitchChain(chainIdHex: string) {
+  // Convert hex chain ID to decimal
+  const chainId = parseInt(chainIdHex, 16);
+
+  // Find the network with this chain ID
+  const networks = await StorageService.getNetworks();
+  const networkIndex = networks.findIndex(n => n.chainId === chainId);
+
+  if (networkIndex === -1) {
+    throw new Error(`Chain ${chainIdHex} not found. Please add it first.`);
+  }
+
+  // Switch to the network
+  await StorageService.setCurrentNetwork(networkIndex);
+
+  // Return the network info
+  return networks[networkIndex];
+}
+
+/**
+ * Handle add chain request (EIP-3085)
+ */
+async function handleAddChain(chainParams: {
+  chainId: string;
+  chainName: string;
+  rpcUrls: string[];
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+  blockExplorerUrls?: string[];
+}) {
+  // Convert hex chain ID to decimal
+  const chainId = parseInt(chainParams.chainId, 16);
+
+  // Check if network already exists
+  const networks = await StorageService.getNetworks();
+  const existingNetwork = networks.find(n => n.chainId === chainId);
+
+  if (existingNetwork) {
+    // Network already exists, switch to it
+    const networkIndex = networks.indexOf(existingNetwork);
+    await StorageService.setCurrentNetwork(networkIndex);
+    return existingNetwork;
+  }
+
+  // Add new network
+  const newNetwork = {
+    chainId,
+    name: chainParams.chainName,
+    rpcUrl: chainParams.rpcUrls[0],
+    symbol: chainParams.nativeCurrency.symbol,
+    blockExplorerUrl: chainParams.blockExplorerUrls?.[0]
+  };
+
+  await StorageService.addNetwork(newNetwork);
+
+  // Switch to the new network
+  const updatedNetworks = await StorageService.getNetworks();
+  const newNetworkIndex = updatedNetworks.findIndex(n => n.chainId === chainId);
+  if (newNetworkIndex !== -1) {
+    await StorageService.setCurrentNetwork(newNetworkIndex);
+  }
+
+  return newNetwork;
 }
 
 console.log('Crypto Wallet background service worker initialized');

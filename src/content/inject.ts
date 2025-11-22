@@ -20,6 +20,11 @@ class EthereumProvider {
   public selectedAddress: string | null = null;
   public networkVersion: string | null = null;
 
+  // Additional MetaMask compatibility properties
+  public _metamask: any = {
+    isUnlocked: () => Promise.resolve(true)
+  };
+
   private eventListeners: Map<string, Set<Function>> = new Map();
   private requestId: number = 0;
   private pendingRequests: Map<number, { resolve: Function; reject: Function }> = new Map();
@@ -164,18 +169,60 @@ class EthereumProvider {
         return this.sendMessage('RPC_CALL', { method, params });
 
       case 'wallet_switchEthereumChain':
-        // Handle chain switching
-        const chainId = (params as any)?.[0]?.chainId;
-        if (chainId) {
-          this.chainId = chainId;
-          this.networkVersion = parseInt(chainId, 16).toString();
-          this.emit('chainChanged', chainId);
+        // Handle chain switching - send to extension
+        const switchChainId = (params as any)?.[0]?.chainId;
+        if (!switchChainId) {
+          throw this.createError(4001, 'Missing chainId parameter');
         }
-        return null;
+        try {
+          await this.sendMessage('SWITCH_CHAIN', { chainId: switchChainId });
+          // Update local state
+          this.chainId = switchChainId;
+          this.networkVersion = parseInt(switchChainId, 16).toString();
+          this.emit('chainChanged', switchChainId);
+          return null;
+        } catch (error: any) {
+          throw this.createError(4902, error.message || 'Chain not available');
+        }
 
       case 'wallet_addEthereumChain':
-        // Handle adding custom chain
-        return this.sendMessage('ADD_NETWORK', { network: params && params[0] });
+        // Handle adding custom chain - send to extension
+        const chainParams = (params as any)?.[0];
+        if (!chainParams) {
+          throw this.createError(4001, 'Missing chain parameters');
+        }
+        try {
+          await this.sendMessage('ADD_CHAIN', { chainParams });
+          // Update local state
+          this.chainId = chainParams.chainId;
+          this.networkVersion = parseInt(chainParams.chainId, 16).toString();
+          this.emit('chainChanged', chainParams.chainId);
+          return null;
+        } catch (error: any) {
+          throw this.createError(4001, error.message || 'Failed to add chain');
+        }
+
+      case 'wallet_watchAsset':
+        // Handle token watch request (for adding tokens)
+        const assetParams = (params as any)?.[0];
+        if (assetParams?.type === 'ERC20') {
+          return this.sendMessage('ADD_TOKEN', {
+            token: {
+              address: assetParams.options.address,
+              symbol: assetParams.options.symbol,
+              name: assetParams.options.symbol, // Use symbol as name if not provided
+              decimals: assetParams.options.decimals,
+              chainId: parseInt(this.chainId || '0x1', 16)
+            }
+          });
+        }
+        throw this.createError(4001, 'Only ERC20 tokens are supported');
+
+      case 'eth_sign':
+        // Legacy sign method (deprecated but still used)
+        return this.sendMessage('SIGN_MESSAGE', {
+          message: params && params[1]
+        });
 
       default:
         throw this.createError(
@@ -252,16 +299,144 @@ class EthereumProvider {
   }
 }
 
-// Only inject if not already present
-if (!(window as any).ethereum) {
-  const provider = new EthereumProvider();
-  (window as any).ethereum = provider;
+console.log('[Crypto Wallet] Inject script starting...');
 
-  // Announce provider to DApps (EIP-6963)
-  window.dispatchEvent(new Event('ethereum#initialized'));
-
-  console.log('Crypto Wallet provider injected');
+// Store reference to any existing provider (e.g., MetaMask)
+const existingProvider = (window as any).ethereum;
+if (existingProvider) {
+  console.log('[Crypto Wallet] Found existing provider:', existingProvider);
 }
+
+// Inject provider (overwrite MetaMask if present)
+const provider = new EthereumProvider();
+console.log('[Crypto Wallet] Provider instance created');
+
+// Aggressively take over window.ethereum
+const setupProvider = () => {
+  try {
+    // Try to delete existing property first
+    delete (window as any).ethereum;
+    console.log('[Crypto Wallet] Deleted existing ethereum property');
+  } catch (e) {
+    console.log('[Crypto Wallet] Could not delete existing property (probably locked)');
+  }
+
+  try {
+    // Try to define our provider
+    Object.defineProperty(window, 'ethereum', {
+      get() {
+        return provider;
+      },
+      set(_newProvider) {
+        console.warn('[Crypto Wallet] Blocked attempt to overwrite ethereum provider');
+      },
+      configurable: false
+    });
+
+    // VERIFY it actually worked
+    if ((window as any).ethereum?.isCryptoWallet) {
+      console.log('[Crypto Wallet] Successfully defined ethereum property');
+      return; // Success, exit function
+    } else {
+      console.warn('[Crypto Wallet] Object.defineProperty succeeded but did not replace provider');
+      throw new Error('Provider not replaced');
+    }
+  } catch (e) {
+    // If we can't define the property, it's already locked by MetaMask
+    console.warn('[Crypto Wallet] Could not define property, trying to hijack existing provider...');
+
+    // Plan B: Mutate the existing provider object in place
+    console.log('[Crypto Wallet] Attempting to hijack existing provider by mutation...');
+    const existingEthereum = (window as any).ethereum;
+
+    // Copy all our provider's properties/methods to the existing object
+    try {
+      // Add our identifier
+      existingEthereum.isCryptoWallet = true;
+
+      // Store original request method (not used but good to have)
+      const _originalRequest = existingEthereum.request?.bind(existingEthereum);
+
+      // Override the request method to redirect to our provider
+      existingEthereum.request = function(args: any) {
+        console.log('[Crypto Wallet] Intercepted request:', args.method);
+        return provider.request(args);
+      };
+
+      // Override other critical methods
+      if (existingEthereum.sendAsync) {
+        existingEthereum.sendAsync = provider.sendAsync.bind(provider);
+      }
+      if (existingEthereum.send) {
+        existingEthereum.send = provider.send.bind(provider);
+      }
+
+      // Verify it worked
+      if ((window as any).ethereum?.isCryptoWallet) {
+        console.log('[Crypto Wallet] ✅ Successfully hijacked existing provider!');
+        return; // Success
+      } else {
+        throw new Error('Mutation failed to set isCryptoWallet');
+      }
+    } catch (e2) {
+      console.error('[Crypto Wallet] Mutation failed:', e2);
+
+      // Plan C: Last resort - wrap the entire ethereum object in our own Proxy
+      console.warn('[Crypto Wallet] Using Proxy wrapper as last resort...');
+      try {
+        // We can't replace window.ethereum, but we can document our presence
+        (window as any).cryptoWalletProvider = provider;
+        console.log('[Crypto Wallet] Provider available at window.cryptoWalletProvider');
+        console.warn('[Crypto Wallet] ⚠️ Could not override MetaMask. To use this wallet, disable MetaMask extension.');
+      } catch (e3) {
+        console.error('[Crypto Wallet] All override attempts failed!', e3);
+      }
+    }
+  }
+};
+
+// Setup immediately
+setupProvider();
+console.log('[Crypto Wallet] Provider setup complete');
+console.log('[Crypto Wallet] Checking: window.ethereum =', (window as any).ethereum);
+console.log('[Crypto Wallet] Checking: window.ethereum.isCryptoWallet =', (window as any).ethereum?.isCryptoWallet);
+console.log('[Crypto Wallet] Checking: window.ethereum.isMetaMask =', (window as any).ethereum?.isMetaMask);
+
+// Verify provider is set correctly after a delay
+setTimeout(() => {
+  const currentProvider = (window as any).ethereum;
+  if (currentProvider?.isCryptoWallet) {
+    console.log('[Crypto Wallet] ✅ Provider successfully installed!');
+  } else {
+    console.warn('[Crypto Wallet] ⚠️ Provider may not be correctly installed');
+    console.log('[Crypto Wallet] Current provider:', currentProvider);
+  }
+}, 1000);
+
+// Announce provider to DApps (EIP-6963)
+window.dispatchEvent(new Event('ethereum#initialized'));
+
+// EIP-6963: Announce wallet
+const announceProvider = () => {
+  const info = {
+    uuid: 'crypto-wallet-uuid',
+    name: 'Crypto Wallet',
+    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="24" font-size="24">💰</text></svg>',
+    rdns: 'com.cryptowallet'
+  };
+
+  window.dispatchEvent(
+    new CustomEvent('eip6963:announceProvider', {
+      detail: Object.freeze({ info, provider })
+    })
+  );
+};
+
+// Announce immediately and on request
+announceProvider();
+window.addEventListener('eip6963:requestProvider', announceProvider);
+
+console.log('[Crypto Wallet] Provider injected and locked', existingProvider ? '(replaced existing provider)' : '');
 
 // Export to make this a module
 export {};

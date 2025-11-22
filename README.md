@@ -96,6 +96,21 @@ crypto-wallet-extension/
 3. Create a password
 4. Your wallet is restored
 
+### Resetting the Wallet
+
+If you need to start fresh or fix issues:
+
+1. Open the extension
+2. Go to the "Settings" tab
+3. Scroll to the "Danger Zone"
+4. Click "Reset Wallet"
+5. Confirm twice (this is irreversible!)
+6. Create a new wallet or import an existing one
+
+**⚠️ Important**: Save your recovery phrase before resetting! This action deletes all wallet data permanently.
+
+See `RESET_WALLET_GUIDE.md` for detailed instructions.
+
 ### Using with DApps
 
 The wallet automatically injects a Web3 provider into web pages, making it compatible with:

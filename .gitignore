@@ -8,3 +8,5 @@ dist/
 *.key
 .vscode/
 .idea/
+
+*.md

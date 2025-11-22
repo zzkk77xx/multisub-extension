@@ -304,6 +304,110 @@
     .hidden {
       display: none !important;
     }
+
+    .network-item {
+      background: #f7f7f7;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px 15px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .network-item:hover {
+      border-color: #667eea;
+      background: #f0f0ff;
+    }
+
+    .network-item.active {
+      border-color: #667eea;
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    }
+
+    .network-item-info {
+      flex: 1;
+    }
+
+    .network-item-name {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .network-item-chain {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .network-item-badge {
+      background: #667eea;
+      color: white;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+    }
+
+    .token-item {
+      background: #f7f7f7;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 12px 15px;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .token-item-info {
+      flex: 1;
+    }
+
+    .token-item-name {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 3px;
+    }
+
+    .token-item-address {
+      font-size: 11px;
+      color: #888;
+      font-family: 'Courier New', monospace;
+    }
+
+    .token-item-balance {
+      text-align: right;
+    }
+
+    .token-item-amount {
+      font-weight: 600;
+      font-size: 14px;
+      color: #667eea;
+    }
+
+    .token-item-symbol {
+      font-size: 11px;
+      color: #888;
+    }
+
+    .token-item-remove {
+      background: #dc3545;
+      color: white;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      margin-left: 10px;
+    }
+
+    .token-item-remove:hover {
+      background: #c82333;
+    }
   </style>
 </head>
 <body>
@@ -432,6 +536,8 @@
 
         <div class="tabs">
           <div class="tab active" data-tab="accounts">Accounts</div>
+          <div class="tab" data-tab="tokens">Tokens</div>
+          <div class="tab" data-tab="networks">Networks</div>
           <div class="tab" data-tab="settings">Settings</div>
         </div>
 
@@ -439,10 +545,168 @@
           <button class="button button-secondary" id="add-account-btn">Add Account</button>
         </div>
 
+        <div id="tokens-tab" class="tab-content hidden">
+          <div style="margin-bottom: 20px;">
+            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Your Tokens</h3>
+            <div id="tokens-list"></div>
+          </div>
+          <button class="button button-secondary" id="add-token-btn">Add Token</button>
+        </div>
+
+        <div id="networks-tab" class="tab-content hidden">
+          <div style="margin-bottom: 20px;">
+            <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 15px;">Select Network</h3>
+            <div id="networks-list"></div>
+          </div>
+          <button class="button button-secondary" id="add-network-btn">Add Custom Network</button>
+        </div>
+
         <div id="settings-tab" class="tab-content hidden">
           <button class="button button-secondary" id="lock-wallet-btn">Lock Wallet</button>
           <button class="button button-secondary" id="show-mnemonic-btn">Show Recovery Phrase</button>
+
+          <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #e0e0e0;">
+            <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+              <strong style="color: #856404; display: block; margin-bottom: 5px;">⚠️ Danger Zone</strong>
+              <span style="color: #856404; font-size: 13px;">Cette action supprimera toutes les données du wallet. Assurez-vous d'avoir sauvegardé votre phrase de récupération !</span>
+            </div>
+            <div style="margin-bottom: 10px;">
+              <label style="display: flex; align-items: center; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="reset-confirm-checkbox" style="margin-right: 8px;">
+                <span>Je confirme avoir sauvegardé ma phrase de récupération</span>
+              </label>
+            </div>
+            <button class="button" id="reset-wallet-btn" style="background: #dc3545; width: 100%;" disabled>Reset Wallet</button>
+          </div>
         </div>
+      </div>
+
+      <!-- Send Screen -->
+      <div id="send-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Send</h2>
+
+        <div class="input-group">
+          <label for="send-to">To Address</label>
+          <input type="text" id="send-to" placeholder="0x...">
+        </div>
+
+        <div class="input-group">
+          <label for="send-amount">Amount</label>
+          <input type="text" id="send-amount" placeholder="0.0">
+        </div>
+
+        <div class="input-group">
+          <label for="send-gas">Gas Limit (optional)</label>
+          <input type="text" id="send-gas" placeholder="21000">
+        </div>
+
+        <div id="send-error" class="error hidden"></div>
+        <div id="send-success" class="success hidden"></div>
+
+        <button class="button" id="send-submit-btn">Send Transaction</button>
+        <button class="button button-secondary" id="send-back-btn">Back</button>
+      </div>
+
+      <!-- Receive Screen -->
+      <div id="receive-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Receive</h2>
+
+        <div style="text-align: center; margin: 30px 0;">
+          <div style="font-size: 14px; color: #888; margin-bottom: 20px;">
+            Share your address to receive funds
+          </div>
+
+          <div style="background: #f7f7f7; border: 2px solid #e0e0e0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+            <div id="receive-address" style="font-family: 'Courier New', monospace; font-size: 14px; word-break: break-all; margin-bottom: 15px;">
+              0x0000...0000
+            </div>
+            <button class="button" id="copy-receive-address-btn">Copy Address</button>
+          </div>
+        </div>
+
+        <button class="button button-secondary" id="receive-back-btn">Back</button>
+      </div>
+
+      <!-- Show Recovery Phrase Screen -->
+      <div id="show-mnemonic-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Secret Recovery Phrase</h2>
+
+        <div class="warning">
+          <strong>Warning!</strong>
+          Never share your recovery phrase with anyone. Anyone with this phrase can access your funds.
+        </div>
+
+        <div class="mnemonic-display" id="mnemonic-display-view"></div>
+
+        <button class="button" id="copy-mnemonic-view-btn">Copy to Clipboard</button>
+        <button class="button button-secondary" id="mnemonic-view-back-btn">Back</button>
+      </div>
+
+      <!-- Add Token Screen -->
+      <div id="add-token-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Add Token</h2>
+
+        <div class="input-group">
+          <label for="token-address">Token Contract Address</label>
+          <input type="text" id="token-address" placeholder="0x...">
+        </div>
+
+        <div class="input-group">
+          <label for="token-symbol">Token Symbol</label>
+          <input type="text" id="token-symbol" placeholder="e.g. USDT">
+        </div>
+
+        <div class="input-group">
+          <label for="token-name">Token Name</label>
+          <input type="text" id="token-name" placeholder="e.g. Tether USD">
+        </div>
+
+        <div class="input-group">
+          <label for="token-decimals">Decimals</label>
+          <input type="number" id="token-decimals" placeholder="18">
+        </div>
+
+        <div id="add-token-error" class="error hidden"></div>
+        <div id="add-token-success" class="success hidden"></div>
+
+        <button class="button" id="add-token-submit-btn">Add Token</button>
+        <button class="button button-secondary" id="add-token-back-btn">Back</button>
+      </div>
+
+      <!-- Add Custom Network Screen -->
+      <div id="add-network-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Add Custom Network</h2>
+
+        <div class="input-group">
+          <label for="network-name">Network Name</label>
+          <input type="text" id="network-name" placeholder="e.g. My Custom Network">
+        </div>
+
+        <div class="input-group">
+          <label for="network-rpc">RPC URL</label>
+          <input type="text" id="network-rpc" placeholder="https://...">
+        </div>
+
+        <div class="input-group">
+          <label for="network-chain-id">Chain ID</label>
+          <input type="number" id="network-chain-id" placeholder="e.g. 1">
+        </div>
+
+        <div class="input-group">
+          <label for="network-symbol">Currency Symbol</label>
+          <input type="text" id="network-symbol" placeholder="e.g. ETH">
+        </div>
+
+        <div class="input-group">
+          <label for="network-explorer">Block Explorer URL (optional)</label>
+          <input type="text" id="network-explorer" placeholder="https://...">
+        </div>
+
+        <div id="add-network-error" class="error hidden"></div>
+        <div id="add-network-success" class="success hidden"></div>
+
+        <button class="button" id="add-network-submit-btn">Add Network</button>
+        <button class="button button-secondary" id="add-network-back-btn">Back</button>
       </div>
     </div>
   </div>

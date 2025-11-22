@@ -74,9 +74,64 @@ function setupEventListeners() {
   });
 
   // Main wallet
+  document.getElementById('send-btn')?.addEventListener('click', () => {
+    showScreen('send-screen');
+  });
+  document.getElementById('receive-btn')?.addEventListener('click', () => {
+    showScreen('receive-screen');
+  });
   document.getElementById('copy-address-btn')?.addEventListener('click', copyAddress);
   document.getElementById('add-account-btn')?.addEventListener('click', handleAddAccount);
   document.getElementById('lock-wallet-btn')?.addEventListener('click', handleLock);
+  document.getElementById('reset-wallet-btn')?.addEventListener('click', handleResetWallet);
+
+  // Reset wallet checkbox
+  document.getElementById('reset-confirm-checkbox')?.addEventListener('change', (e) => {
+    const checkbox = e.target as HTMLInputElement;
+    const resetBtn = document.getElementById('reset-wallet-btn') as HTMLButtonElement;
+    if (resetBtn) {
+      resetBtn.disabled = !checkbox.checked;
+    }
+  });
+
+  // Send screen
+  document.getElementById('send-submit-btn')?.addEventListener('click', handleSendTransaction);
+  document.getElementById('send-back-btn')?.addEventListener('click', () => {
+    showScreen('wallet-screen');
+  });
+
+  // Receive screen
+  document.getElementById('copy-receive-address-btn')?.addEventListener('click', copyReceiveAddress);
+  document.getElementById('receive-back-btn')?.addEventListener('click', () => {
+    showScreen('wallet-screen');
+  });
+
+  // Network management
+  document.getElementById('add-network-btn')?.addEventListener('click', () => {
+    showScreen('add-network-screen');
+  });
+  document.getElementById('add-network-submit-btn')?.addEventListener('click', handleAddNetwork);
+  document.getElementById('add-network-back-btn')?.addEventListener('click', async () => {
+    await loadWalletData();
+    showScreen('wallet-screen');
+  });
+
+  // Show recovery phrase
+  document.getElementById('show-mnemonic-btn')?.addEventListener('click', handleShowMnemonic);
+  document.getElementById('copy-mnemonic-view-btn')?.addEventListener('click', copyMnemonicView);
+  document.getElementById('mnemonic-view-back-btn')?.addEventListener('click', () => {
+    showScreen('wallet-screen');
+  });
+
+  // Token management
+  document.getElementById('add-token-btn')?.addEventListener('click', () => {
+    showScreen('add-token-screen');
+  });
+  document.getElementById('add-token-submit-btn')?.addEventListener('click', handleAddToken);
+  document.getElementById('add-token-back-btn')?.addEventListener('click', async () => {
+    await loadWalletData();
+    showScreen('wallet-screen');
+  });
 
   // Tabs
   document.querySelectorAll('.tab').forEach(tab => {
@@ -93,7 +148,7 @@ function setupEventListeners() {
 /**
  * Show screen
  */
-function showScreen(screenId: string) {
+async function showScreen(screenId: string) {
   document.querySelectorAll('.screen').forEach(screen => {
     screen.classList.remove('active');
   });
@@ -103,12 +158,25 @@ function showScreen(screenId: string) {
     screen.classList.add('active');
     currentScreen = screenId;
   }
+
+  // Populate receive address when showing receive screen
+  if (screenId === 'receive-screen') {
+    try {
+      const account = await sendMessage<any>('GET_CURRENT_ACCOUNT');
+      const receiveAddressEl = document.getElementById('receive-address');
+      if (receiveAddressEl && account?.address) {
+        receiveAddressEl.textContent = account.address;
+      }
+    } catch (error) {
+      console.error('Failed to load address:', error);
+    }
+  }
 }
 
 /**
  * Switch tab
  */
-function switchTab(tabName: string) {
+async function switchTab(tabName: string) {
   document.querySelectorAll('.tab').forEach(tab => {
     tab.classList.remove('active');
   });
@@ -125,6 +193,16 @@ function switchTab(tabName: string) {
   const content = document.getElementById(`${tabName}-tab`);
   if (content) {
     content.classList.remove('hidden');
+  }
+
+  // Load networks when switching to networks tab
+  if (tabName === 'networks') {
+    await loadNetworks();
+  }
+
+  // Load tokens when switching to tokens tab
+  if (tabName === 'tokens') {
+    await loadTokens();
   }
 }
 
@@ -242,6 +320,24 @@ async function handleLock() {
     await sendMessage('LOCK_WALLET');
     showScreen('unlock-screen');
   } catch (error) {
+    showError((error as Error).message);
+  }
+}
+
+/**
+ * Handle reset wallet
+ */
+async function handleResetWallet() {
+  console.log('Reset wallet button clicked!');
+
+  try {
+    await sendMessage('RESET_WALLET');
+    console.log('Wallet reset successful');
+
+    // Redirect to welcome screen
+    showScreen('welcome-screen');
+  } catch (error) {
+    console.error('Reset wallet error:', error);
     showError((error as Error).message);
   }
 }
@@ -400,6 +496,431 @@ function showError(message: string) {
 function showSuccess(message: string) {
   alert(message);
 }
+
+/**
+ * Handle send transaction
+ */
+async function handleSendTransaction() {
+  const toAddress = (document.getElementById('send-to') as HTMLInputElement).value.trim();
+  const amount = (document.getElementById('send-amount') as HTMLInputElement).value.trim();
+  const gasLimit = (document.getElementById('send-gas') as HTMLInputElement).value.trim();
+  const errorEl = document.getElementById('send-error');
+  const successEl = document.getElementById('send-success');
+
+  // Validation
+  if (!toAddress || !toAddress.startsWith('0x') || toAddress.length !== 42) {
+    showElementError(errorEl, 'Invalid recipient address');
+    return;
+  }
+
+  if (!amount || parseFloat(amount) <= 0) {
+    showElementError(errorEl, 'Invalid amount');
+    return;
+  }
+
+  try {
+    hideElementError(errorEl);
+    if (successEl) {
+      successEl.classList.add('hidden');
+    }
+
+    // Get current account and network
+    const account = await sendMessage<any>('GET_CURRENT_ACCOUNT');
+    const network = await sendMessage<any>('GET_CURRENT_NETWORK');
+
+    if (!account || !account.address) {
+      showElementError(errorEl, 'No account selected');
+      return;
+    }
+
+    // Build transaction
+    const transaction: any = {
+      to: toAddress,
+      value: '0x' + (parseFloat(amount) * 1e18).toString(16),
+      from: account.address
+    };
+
+    if (gasLimit && parseInt(gasLimit) > 0) {
+      transaction.gasLimit = '0x' + parseInt(gasLimit).toString(16);
+    }
+
+    // Send transaction
+    const result = await sendMessage<{ hash: string; from: string; to: string }>('SEND_TRANSACTION', {
+      transaction,
+      path: account.derivationPath
+    });
+
+    // Show success
+    if (successEl) {
+      successEl.textContent = `Transaction sent! Hash: ${result.hash.slice(0, 10)}...`;
+      successEl.classList.remove('hidden');
+    }
+
+    // Clear inputs
+    (document.getElementById('send-to') as HTMLInputElement).value = '';
+    (document.getElementById('send-amount') as HTMLInputElement).value = '';
+    (document.getElementById('send-gas') as HTMLInputElement).value = '';
+
+    // Refresh balance after a delay
+    setTimeout(async () => {
+      await loadWalletData();
+    }, 2000);
+
+  } catch (error) {
+    showElementError(errorEl, (error as Error).message);
+  }
+}
+
+/**
+ * Copy receive address
+ */
+async function copyReceiveAddress() {
+  try {
+    const account = await sendMessage<any>('GET_CURRENT_ACCOUNT');
+    if (account?.address) {
+      await navigator.clipboard.writeText(account.address);
+
+      const btn = document.getElementById('copy-receive-address-btn');
+      if (btn) {
+        const originalText = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => {
+          btn.textContent = originalText;
+        }, 2000);
+      }
+    }
+  } catch (error) {
+    console.error('Failed to copy address:', error);
+  }
+}
+
+/**
+ * Load and display networks
+ */
+async function loadNetworks() {
+  try {
+    const [networks, currentNetwork] = await Promise.all([
+      sendMessage<any[]>('GET_NETWORKS'),
+      sendMessage<any>('GET_CURRENT_NETWORK')
+    ]);
+
+    const networksList = document.getElementById('networks-list');
+    if (!networksList) return;
+
+    networksList.innerHTML = '';
+
+    networks.forEach((network, index) => {
+      const isActive = currentNetwork && network.chainId === currentNetwork.chainId;
+
+      const networkItem = document.createElement('div');
+      networkItem.className = `network-item ${isActive ? 'active' : ''}`;
+      networkItem.onclick = () => handleNetworkSwitch(index);
+
+      networkItem.innerHTML = `
+        <div class="network-item-info">
+          <div class="network-item-name">${network.name}</div>
+          <div class="network-item-chain">Chain ID: ${network.chainId} • ${network.symbol}</div>
+        </div>
+        ${isActive ? '<div class="network-item-badge">ACTIVE</div>' : ''}
+      `;
+
+      networksList.appendChild(networkItem);
+    });
+  } catch (error) {
+    console.error('Failed to load networks:', error);
+  }
+}
+
+/**
+ * Handle network switch
+ */
+async function handleNetworkSwitch(networkIndex: number) {
+  try {
+    await sendMessage('SET_CURRENT_NETWORK', { index: networkIndex });
+    await loadNetworks();
+    await loadWalletData();
+    showSuccess('Network switched successfully');
+  } catch (error) {
+    showError((error as Error).message);
+  }
+}
+
+/**
+ * Handle add custom network
+ */
+async function handleAddNetwork() {
+  const name = (document.getElementById('network-name') as HTMLInputElement).value.trim();
+  const rpcUrl = (document.getElementById('network-rpc') as HTMLInputElement).value.trim();
+  const chainId = (document.getElementById('network-chain-id') as HTMLInputElement).value.trim();
+  const symbol = (document.getElementById('network-symbol') as HTMLInputElement).value.trim();
+  const explorerUrl = (document.getElementById('network-explorer') as HTMLInputElement).value.trim();
+  const errorEl = document.getElementById('add-network-error');
+  const successEl = document.getElementById('add-network-success');
+
+  // Validation
+  if (!name) {
+    showElementError(errorEl, 'Network name is required');
+    return;
+  }
+
+  if (!rpcUrl || !rpcUrl.startsWith('http')) {
+    showElementError(errorEl, 'Valid RPC URL is required');
+    return;
+  }
+
+  if (!chainId || parseInt(chainId) <= 0) {
+    showElementError(errorEl, 'Valid chain ID is required');
+    return;
+  }
+
+  if (!symbol) {
+    showElementError(errorEl, 'Currency symbol is required');
+    return;
+  }
+
+  try {
+    hideElementError(errorEl);
+    if (successEl) {
+      successEl.classList.add('hidden');
+    }
+
+    const network = {
+      name,
+      rpcUrl,
+      chainId: parseInt(chainId),
+      symbol,
+      blockExplorerUrl: explorerUrl || undefined
+    };
+
+    await sendMessage('ADD_NETWORK', { network });
+
+    // Show success
+    if (successEl) {
+      successEl.textContent = 'Network added successfully!';
+      successEl.classList.remove('hidden');
+    }
+
+    // Clear inputs
+    (document.getElementById('network-name') as HTMLInputElement).value = '';
+    (document.getElementById('network-rpc') as HTMLInputElement).value = '';
+    (document.getElementById('network-chain-id') as HTMLInputElement).value = '';
+    (document.getElementById('network-symbol') as HTMLInputElement).value = '';
+    (document.getElementById('network-explorer') as HTMLInputElement).value = '';
+
+    // Go back to wallet after a delay
+    setTimeout(async () => {
+      await loadWalletData();
+      showScreen('wallet-screen');
+    }, 2000);
+
+  } catch (error) {
+    showElementError(errorEl, (error as Error).message);
+  }
+}
+
+/**
+ * Handle show mnemonic
+ */
+async function handleShowMnemonic() {
+  try {
+    const result = await sendMessage<{ mnemonic: string }>('GET_MNEMONIC');
+    const mnemonicDisplay = document.getElementById('mnemonic-display-view');
+
+    if (mnemonicDisplay && result?.mnemonic) {
+      mnemonicDisplay.textContent = result.mnemonic;
+      showScreen('show-mnemonic-screen');
+    } else {
+      showError('Failed to retrieve recovery phrase');
+    }
+  } catch (error) {
+    showError((error as Error).message);
+  }
+}
+
+/**
+ * Copy mnemonic from view screen
+ */
+async function copyMnemonicView() {
+  try {
+    const mnemonicDisplay = document.getElementById('mnemonic-display-view');
+    if (!mnemonicDisplay || !mnemonicDisplay.textContent) {
+      return;
+    }
+
+    await navigator.clipboard.writeText(mnemonicDisplay.textContent);
+
+    const btn = document.getElementById('copy-mnemonic-view-btn');
+    if (btn) {
+      const originalText = btn.textContent;
+      btn.textContent = 'Copied!';
+      setTimeout(() => {
+        btn.textContent = originalText;
+      }, 2000);
+    }
+  } catch (error) {
+    console.error('Failed to copy mnemonic:', error);
+    showError('Failed to copy to clipboard');
+  }
+}
+
+/**
+ * Load and display tokens
+ */
+async function loadTokens() {
+  try {
+    const [currentNetwork, currentAccount] = await Promise.all([
+      sendMessage<any>('GET_CURRENT_NETWORK'),
+      sendMessage<any>('GET_CURRENT_ACCOUNT')
+    ]);
+
+    if (!currentNetwork || !currentAccount) {
+      return;
+    }
+
+    const tokens = await sendMessage<any[]>('GET_TOKENS_FOR_CHAIN', {
+      chainId: currentNetwork.chainId
+    });
+
+    const tokensList = document.getElementById('tokens-list');
+    if (!tokensList) return;
+
+    if (tokens.length === 0) {
+      tokensList.innerHTML = '<div style="text-align: center; padding: 20px; color: #888; font-size: 13px;">No tokens added yet. Click "Add Token" to get started.</div>';
+      return;
+    }
+
+    tokensList.innerHTML = '<div style="font-size: 12px; color: #888; margin-bottom: 10px;">Loading balances...</div>';
+
+    // Load token balances
+    const tokenElements: string[] = [];
+    for (const token of tokens) {
+      try {
+        const balance = await sendMessage<{ balance: string; formatted: string }>('GET_TOKEN_BALANCE', {
+          tokenAddress: token.address,
+          walletAddress: currentAccount.address
+        });
+
+        const shortAddress = `${token.address.slice(0, 6)}...${token.address.slice(-4)}`;
+        const formattedBalance = parseFloat(balance.formatted).toFixed(4);
+
+        tokenElements.push(`
+          <div class="token-item">
+            <div class="token-item-info">
+              <div class="token-item-name">${token.name} (${token.symbol})</div>
+              <div class="token-item-address">${shortAddress}</div>
+            </div>
+            <div class="token-item-balance">
+              <div class="token-item-amount">${formattedBalance}</div>
+              <div class="token-item-symbol">${token.symbol}</div>
+            </div>
+            <button class="token-item-remove" onclick="handleRemoveToken('${token.address}', ${token.chainId})">Remove</button>
+          </div>
+        `);
+      } catch (error) {
+        console.error(`Failed to load balance for ${token.symbol}:`, error);
+      }
+    }
+
+    tokensList.innerHTML = tokenElements.join('');
+  } catch (error) {
+    console.error('Failed to load tokens:', error);
+  }
+}
+
+/**
+ * Handle add token
+ */
+async function handleAddToken() {
+  const address = (document.getElementById('token-address') as HTMLInputElement).value.trim();
+  const symbol = (document.getElementById('token-symbol') as HTMLInputElement).value.trim();
+  const name = (document.getElementById('token-name') as HTMLInputElement).value.trim();
+  const decimals = (document.getElementById('token-decimals') as HTMLInputElement).value.trim();
+  const errorEl = document.getElementById('add-token-error');
+  const successEl = document.getElementById('add-token-success');
+
+  // Validation
+  if (!address || !address.startsWith('0x') || address.length !== 42) {
+    showElementError(errorEl, 'Valid token contract address is required');
+    return;
+  }
+
+  if (!symbol) {
+    showElementError(errorEl, 'Token symbol is required');
+    return;
+  }
+
+  if (!name) {
+    showElementError(errorEl, 'Token name is required');
+    return;
+  }
+
+  if (!decimals || parseInt(decimals) < 0) {
+    showElementError(errorEl, 'Valid decimals value is required');
+    return;
+  }
+
+  try {
+    hideElementError(errorEl);
+    if (successEl) {
+      successEl.classList.add('hidden');
+    }
+
+    const network = await sendMessage<any>('GET_CURRENT_NETWORK');
+    if (!network) {
+      showElementError(errorEl, 'No network selected');
+      return;
+    }
+
+    const token = {
+      address,
+      symbol,
+      name,
+      decimals: parseInt(decimals),
+      chainId: network.chainId
+    };
+
+    await sendMessage('ADD_TOKEN', { token });
+
+    // Show success
+    if (successEl) {
+      successEl.textContent = 'Token added successfully!';
+      successEl.classList.remove('hidden');
+    }
+
+    // Clear inputs
+    (document.getElementById('token-address') as HTMLInputElement).value = '';
+    (document.getElementById('token-symbol') as HTMLInputElement).value = '';
+    (document.getElementById('token-name') as HTMLInputElement).value = '';
+    (document.getElementById('token-decimals') as HTMLInputElement).value = '';
+
+    // Go back to wallet after a delay
+    setTimeout(async () => {
+      await loadWalletData();
+      showScreen('wallet-screen');
+    }, 2000);
+
+  } catch (error) {
+    showElementError(errorEl, (error as Error).message);
+  }
+}
+
+/**
+ * Handle remove token
+ */
+async function handleRemoveToken(address: string, chainId: number) {
+  try {
+    const confirmed = confirm('Are you sure you want to remove this token?');
+    if (!confirmed) return;
+
+    await sendMessage('REMOVE_TOKEN', { address, chainId });
+    await loadTokens();
+  } catch (error) {
+    showError((error as Error).message);
+  }
+}
+
+// Make handleRemoveToken globally accessible
+(window as any).handleRemoveToken = handleRemoveToken;
 
 // Initialize on load
 document.addEventListener('DOMContentLoaded', initialize);

@@ -65,6 +65,9 @@ async function handleMessage(
     case 'LOCK_WALLET':
       return await lockWallet();
 
+    case 'RESET_WALLET':
+      return await resetWallet();
+
     case 'GET_WALLET_STATUS':
       return await getWalletStatus();
 
@@ -96,13 +99,77 @@ async function handleMessage(
       return await getBalance(payload.address);
 
     case 'SIGN_MESSAGE':
+      // If path is not provided, use current account's path (for DApp requests)
+      if (!payload.path) {
+        const currentAccount = await StorageService.getCurrentAccount();
+        if (!currentAccount) {
+          throw new Error('No account selected');
+        }
+        if (!currentAccount.derivationPath) {
+          throw new Error('Account derivation path not found');
+        }
+        payload.path = currentAccount.derivationPath;
+      }
       return await signMessage(payload);
 
     case 'SIGN_TRANSACTION':
+      // If path is not provided, use current account's path (for DApp requests)
+      if (!payload.path) {
+        const currentAccount = await StorageService.getCurrentAccount();
+        if (!currentAccount) {
+          throw new Error('No account selected');
+        }
+        if (!currentAccount.derivationPath) {
+          throw new Error('Account derivation path not found');
+        }
+        payload.path = currentAccount.derivationPath;
+      }
       return await signTransaction(payload);
 
     case 'SEND_TRANSACTION':
+      // If path is not provided, use current account's path (for DApp requests)
+      if (!payload.path && !payload.transaction) {
+        // This is a transaction request from DApp
+        const currentAccount = await StorageService.getCurrentAccount();
+        if (!currentAccount) {
+          throw new Error('No account selected');
+        }
+        if (!currentAccount.derivationPath) {
+          throw new Error('Account derivation path not found');
+        }
+        return await sendTransaction({
+          transaction: payload,
+          path: currentAccount.derivationPath
+        });
+      } else if (!payload.path) {
+        const currentAccount = await StorageService.getCurrentAccount();
+        if (!currentAccount) {
+          throw new Error('No account selected');
+        }
+        if (!currentAccount.derivationPath) {
+          throw new Error('Account derivation path not found');
+        }
+        payload.path = currentAccount.derivationPath;
+      }
       return await sendTransaction(payload);
+
+    case 'GET_MNEMONIC':
+      return await getMnemonic();
+
+    case 'GET_TOKENS':
+      return await StorageService.getTokens();
+
+    case 'GET_TOKENS_FOR_CHAIN':
+      return await StorageService.getTokensForChain(payload.chainId);
+
+    case 'ADD_TOKEN':
+      return await StorageService.addToken(payload.token);
+
+    case 'REMOVE_TOKEN':
+      return await StorageService.removeToken(payload.address, payload.chainId);
+
+    case 'GET_TOKEN_BALANCE':
+      return await getTokenBalance(payload.tokenAddress, payload.walletAddress);
 
     case 'REQUEST_ACCOUNTS':
       return await requestAccounts(sender);
@@ -185,6 +252,16 @@ async function lockWallet() {
   walletInstance = null;
   await StorageService.lockWallet();
   return { locked: true };
+}
+
+/**
+ * Reset wallet (delete all data)
+ */
+async function resetWallet() {
+  walletInstance?.clear();
+  walletInstance = null;
+  await StorageService.resetWallet();
+  return { reset: true };
 }
 
 /**
@@ -358,6 +435,58 @@ async function requestTransaction(
   });
 
   return result.hash;
+}
+
+/**
+ * Get mnemonic phrase (requires wallet to be unlocked)
+ */
+async function getMnemonic() {
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  const mnemonic = walletInstance.getMnemonic();
+  if (!mnemonic) {
+    throw new Error('Mnemonic not available');
+  }
+
+  return { mnemonic };
+}
+
+/**
+ * Get ERC20 token balance
+ */
+async function getTokenBalance(tokenAddress: string, walletAddress: string) {
+  const network = await StorageService.getCurrentNetwork();
+  if (!network) {
+    throw new Error('No network selected');
+  }
+
+  const provider = new ethers.JsonRpcProvider(network.rpcUrl);
+
+  // ERC20 ABI for balanceOf function
+  const erc20Abi = [
+    'function balanceOf(address owner) view returns (uint256)',
+    'function decimals() view returns (uint8)'
+  ];
+
+  const contract = new ethers.Contract(tokenAddress, erc20Abi, provider);
+
+  try {
+    const balance = await contract.balanceOf(walletAddress);
+    const decimals = await contract.decimals();
+
+    return {
+      balance: balance.toString(),
+      formatted: ethers.formatUnits(balance, decimals)
+    };
+  } catch (error) {
+    console.error('Failed to get token balance:', error);
+    return {
+      balance: '0',
+      formatted: '0'
+    };
+  }
 }
 
 console.log('Crypto Wallet background service worker initialized');

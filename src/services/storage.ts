@@ -1,5 +1,5 @@
-import { CryptoService } from '../core/crypto';
-import { WalletAccount } from '../core/wallet';
+import { CryptoService } from "../core/crypto";
+import { WalletAccount } from "../core/wallet";
 
 export interface StoredWallet {
   encryptedMnemonic: string;
@@ -16,6 +16,14 @@ export interface Network {
   blockExplorerUrl?: string;
 }
 
+export interface Token {
+  address: string;
+  symbol: string;
+  name: string;
+  decimals: number;
+  chainId: number;
+}
+
 export interface WalletState {
   isLocked: boolean;
   currentAccount: number;
@@ -23,10 +31,11 @@ export interface WalletState {
 }
 
 export class StorageService {
-  private static readonly WALLET_KEY = 'wallet';
-  private static readonly NETWORKS_KEY = 'networks';
-  private static readonly STATE_KEY = 'state';
-  private static readonly SESSION_PASSWORD_KEY = 'sessionPassword';
+  private static readonly WALLET_KEY = "wallet";
+  private static readonly NETWORKS_KEY = "networks";
+  private static readonly TOKENS_KEY = "tokens";
+  private static readonly STATE_KEY = "state";
+  private static readonly SESSION_PASSWORD_KEY = "sessionPassword";
 
   /**
    * Initialize wallet with mnemonic and password
@@ -43,7 +52,7 @@ export class StorageService {
       encryptedMnemonic,
       accounts,
       passwordHash,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     };
 
     await chrome.storage.local.set({ [this.WALLET_KEY]: wallet });
@@ -52,7 +61,7 @@ export class StorageService {
     await this.setState({
       isLocked: false,
       currentAccount: 0,
-      currentNetwork: 0
+      currentNetwork: 0,
     });
 
     // Initialize default networks
@@ -73,12 +82,12 @@ export class StorageService {
   static async unlockWallet(password: string): Promise<string> {
     const wallet = await this.getWallet();
     if (!wallet) {
-      throw new Error('No wallet found');
+      throw new Error("No wallet found");
     }
 
     const passwordHash = await CryptoService.hash(password);
     if (passwordHash !== wallet.passwordHash) {
-      throw new Error('Invalid password');
+      throw new Error("Invalid password");
     }
 
     try {
@@ -90,14 +99,18 @@ export class StorageService {
       // Store session password in memory (session storage)
       const sessionPassword = CryptoService.generateSessionPassword();
       await chrome.storage.session.set({
-        [this.SESSION_PASSWORD_KEY]: sessionPassword
+        [this.SESSION_PASSWORD_KEY]: sessionPassword,
       });
 
-      await this.setState({ isLocked: false, currentAccount: 0, currentNetwork: 0 });
+      await this.setState({
+        isLocked: false,
+        currentAccount: 0,
+        currentNetwork: 0,
+      });
 
       return mnemonic;
     } catch (error) {
-      throw new Error('Failed to decrypt wallet');
+      throw new Error("Failed to decrypt wallet");
     }
   }
 
@@ -106,7 +119,11 @@ export class StorageService {
    */
   static async lockWallet(): Promise<void> {
     await chrome.storage.session.remove(this.SESSION_PASSWORD_KEY);
-    await this.setState({ isLocked: true, currentAccount: 0, currentNetwork: 0 });
+    await this.setState({
+      isLocked: true,
+      currentAccount: 0,
+      currentNetwork: 0,
+    });
   }
 
   /**
@@ -116,7 +133,9 @@ export class StorageService {
     const state = await this.getState();
     if (!state) return true;
 
-    const sessionData = await chrome.storage.session.get(this.SESSION_PASSWORD_KEY);
+    const sessionData = await chrome.storage.session.get(
+      this.SESSION_PASSWORD_KEY
+    );
     return !sessionData[this.SESSION_PASSWORD_KEY] || state.isLocked;
   }
 
@@ -126,7 +145,7 @@ export class StorageService {
   static async addAccount(account: WalletAccount): Promise<void> {
     const wallet = await this.getWallet();
     if (!wallet) {
-      throw new Error('No wallet found');
+      throw new Error("No wallet found");
     }
 
     wallet.accounts.push(account);
@@ -144,14 +163,17 @@ export class StorageService {
   /**
    * Update account
    */
-  static async updateAccount(index: number, account: WalletAccount): Promise<void> {
+  static async updateAccount(
+    index: number,
+    account: WalletAccount
+  ): Promise<void> {
     const wallet = await this.getWallet();
     if (!wallet) {
-      throw new Error('No wallet found');
+      throw new Error("No wallet found");
     }
 
     if (index < 0 || index >= wallet.accounts.length) {
-      throw new Error('Invalid account index');
+      throw new Error("Invalid account index");
     }
 
     wallet.accounts[index] = account;
@@ -188,32 +210,67 @@ export class StorageService {
     const defaultNetworks: Network[] = [
       {
         chainId: 1,
-        name: 'Ethereum Mainnet',
-        rpcUrl: 'https://eth.llamarpc.com',
-        symbol: 'ETH',
-        blockExplorerUrl: 'https://etherscan.io'
+        name: "Ethereum Mainnet",
+        rpcUrl: "https://eth.llamarpc.com",
+        symbol: "ETH",
+        blockExplorerUrl: "https://etherscan.io",
       },
       {
         chainId: 137,
-        name: 'Polygon',
-        rpcUrl: 'https://polygon-rpc.com',
-        symbol: 'MATIC',
-        blockExplorerUrl: 'https://polygonscan.com'
+        name: "Polygon",
+        rpcUrl: "https://polygon-rpc.com",
+        symbol: "POL",
+        blockExplorerUrl: "https://polygonscan.com",
       },
       {
         chainId: 56,
-        name: 'BNB Smart Chain',
-        rpcUrl: 'https://bsc-dataseed.binance.org',
-        symbol: 'BNB',
-        blockExplorerUrl: 'https://bscscan.com'
+        name: "BNB Smart Chain",
+        rpcUrl: "https://bsc-dataseed.binance.org",
+        symbol: "BNB",
+        blockExplorerUrl: "https://bscscan.com",
       },
       {
         chainId: 42161,
-        name: 'Arbitrum One',
-        rpcUrl: 'https://arb1.arbitrum.io/rpc',
-        symbol: 'ETH',
-        blockExplorerUrl: 'https://arbiscan.io'
-      }
+        name: "Arbitrum One",
+        rpcUrl: "https://arb1.arbitrum.io/rpc",
+        symbol: "ETH",
+        blockExplorerUrl: "https://arbiscan.io",
+      },
+      {
+        chainId: 10,
+        name: "Optimism",
+        rpcUrl: "https://mainnet.optimism.io",
+        symbol: "ETH",
+        blockExplorerUrl: "https://optimistic.etherscan.io",
+      },
+      {
+        chainId: 8453,
+        name: "Base",
+        rpcUrl: "https://mainnet.base.org",
+        symbol: "ETH",
+        blockExplorerUrl: "https://basescan.org",
+      },
+      {
+        chainId: 43114,
+        name: "Avalanche C-Chain",
+        rpcUrl: "https://api.avax.network/ext/bc/C/rpc",
+        symbol: "AVAX",
+        blockExplorerUrl: "https://snowtrace.io",
+      },
+      {
+        chainId: 250,
+        name: "Fantom Opera",
+        rpcUrl: "https://rpc.ftm.tools",
+        symbol: "FTM",
+        blockExplorerUrl: "https://ftmscan.com",
+      },
+      {
+        chainId: 11155111,
+        name: "Sepolia Testnet",
+        rpcUrl: "https://rpc.sepolia.org",
+        symbol: "ETH",
+        blockExplorerUrl: "https://sepolia.etherscan.io",
+      },
     ];
 
     await chrome.storage.local.set({ [this.NETWORKS_KEY]: defaultNetworks });
@@ -234,9 +291,9 @@ export class StorageService {
     const networks = await this.getNetworks();
 
     // Check if network already exists
-    const exists = networks.some(n => n.chainId === network.chainId);
+    const exists = networks.some((n) => n.chainId === network.chainId);
     if (exists) {
-      throw new Error('Network already exists');
+      throw new Error("Network already exists");
     }
 
     networks.push(network);
@@ -295,5 +352,56 @@ export class StorageService {
   static async resetWallet(): Promise<void> {
     await chrome.storage.local.clear();
     await chrome.storage.session.clear();
+  }
+
+  /**
+   * Get all tokens
+   */
+  static async getTokens(): Promise<Token[]> {
+    const result = await chrome.storage.local.get(this.TOKENS_KEY);
+    return result[this.TOKENS_KEY] || [];
+  }
+
+  /**
+   * Add custom token
+   */
+  static async addToken(token: Token): Promise<void> {
+    const tokens = await this.getTokens();
+
+    // Check if token already exists for this chain
+    const exists = tokens.some(
+      (t) =>
+        t.address.toLowerCase() === token.address.toLowerCase() &&
+        t.chainId === token.chainId
+    );
+    if (exists) {
+      throw new Error("Token already exists");
+    }
+
+    tokens.push(token);
+    await chrome.storage.local.set({ [this.TOKENS_KEY]: tokens });
+  }
+
+  /**
+   * Get tokens for a specific chain
+   */
+  static async getTokensForChain(chainId: number): Promise<Token[]> {
+    const tokens = await this.getTokens();
+    return tokens.filter((t) => t.chainId === chainId);
+  }
+
+  /**
+   * Remove token
+   */
+  static async removeToken(address: string, chainId: number): Promise<void> {
+    const tokens = await this.getTokens();
+    const filtered = tokens.filter(
+      (t) =>
+        !(
+          t.address.toLowerCase() === address.toLowerCase() &&
+          t.chainId === chainId
+        )
+    );
+    await chrome.storage.local.set({ [this.TOKENS_KEY]: filtered });
   }
 }

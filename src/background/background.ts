@@ -2,9 +2,36 @@ import { Wallet } from '../core/wallet';
 import { StorageService } from '../services/storage';
 import { ethers } from 'ethers';
 import { wrapTransferThroughModule } from '../services/defiInteractor';
+import { BaseSigner, SignerType, LedgerDeviceManager } from '../signers';
 
 // In-memory wallet instance (cleared when locked)
 let walletInstance: Wallet | null = null;
+
+// Get signer for the current account
+async function getCurrentSigner(): Promise<BaseSigner> {
+  const walletType = await StorageService.getWalletType();
+  const currentAccount = await StorageService.getCurrentAccount();
+
+  if (!currentAccount) {
+    throw new Error('No account selected');
+  }
+
+  if (!currentAccount.derivationPath) {
+    throw new Error('Account derivation path not found');
+  }
+
+  if (walletType === SignerType.LEDGER) {
+    // For Ledger, create a new signer instance
+    return Wallet.createLedgerSigner(currentAccount.derivationPath);
+  }
+
+  // For software wallet, use the wallet instance
+  if (!walletInstance) {
+    throw new Error('Wallet is locked');
+  }
+
+  return walletInstance.createSigner(currentAccount.derivationPath, SignerType.SOFTWARE);
+}
 
 // Pending requests from DApps
 interface PendingRequest {
@@ -260,6 +287,18 @@ async function handleMessage(
     case 'REMOVE_DEFI_INTERACTOR_CONFIG':
       return await StorageService.removeDeFiInteractorConfig(payload.chainId);
 
+    case 'LEDGER_CHECK_SUPPORT':
+      return { supported: LedgerDeviceManager.isSupported() };
+
+    case 'LEDGER_REQUEST_DEVICE':
+      return await LedgerDeviceManager.requestDevice();
+
+    case 'LEDGER_DERIVE_ADDRESSES':
+      return await LedgerDeviceManager.deriveAddresses(payload.basePath, payload.count);
+
+    case 'CREATE_LEDGER_WALLET':
+      return await createLedgerWallet(payload);
+
     default:
       throw new Error(`Unknown message type: ${type}`);
   }
@@ -319,9 +358,55 @@ async function createWallet(payload: { password: string; mnemonic?: string }) {
 }
 
 /**
+ * Create a new Ledger wallet
+ */
+async function createLedgerWallet(payload: { password: string; accounts: any[] }) {
+  const { password, accounts } = payload;
+
+  await StorageService.createLedgerWallet(password, accounts);
+
+  // No wallet instance needed for Ledger
+  walletInstance = null;
+
+  return { address: accounts[0]?.address };
+}
+
+/**
  * Unlock wallet
  */
 async function unlockWallet(password: string) {
+  const walletType = await StorageService.getWalletType();
+
+  // For Ledger wallets, just verify password (no mnemonic to restore)
+  if (walletType === SignerType.LEDGER) {
+    const wallet = await StorageService.getWallet();
+    if (!wallet) {
+      throw new Error("No wallet found");
+    }
+
+    const passwordHash = await (await import('../core/crypto')).CryptoService.hash(password);
+    if (passwordHash !== wallet.passwordHash) {
+      throw new Error("Invalid password");
+    }
+
+    // Store session password for Ledger
+    const sessionPassword = (await import('../core/crypto')).CryptoService.generateSessionPassword();
+    await chrome.storage.session.set({
+      sessionPassword,
+    });
+
+    const state = await StorageService.getState();
+    await StorageService.setState({
+      isLocked: false,
+      currentAccount: state?.currentAccount ?? 0,
+      currentNetwork: state?.currentNetwork ?? 0,
+    } as any);
+
+    const currentAccount = await StorageService.getCurrentAccount();
+    return { address: currentAccount?.address, walletType: SignerType.LEDGER };
+  }
+
+  // For software wallets, restore mnemonic
   const mnemonic = await StorageService.unlockWallet(password);
 
   const wallet = new Wallet();
@@ -330,7 +415,7 @@ async function unlockWallet(password: string) {
   walletInstance = wallet;
 
   const currentAccount = await StorageService.getCurrentAccount();
-  return { address: currentAccount?.address };
+  return { address: currentAccount?.address, walletType: SignerType.SOFTWARE };
 }
 
 /**
@@ -401,14 +486,33 @@ async function getBalance(address: string) {
 /**
  * Sign a message
  */
-async function signMessage(payload: { message: string; path: string; typed?: boolean }) {
-  if (!walletInstance) {
-    throw new Error('Wallet is locked');
+async function signMessage(payload: { message: string; path?: string; typed?: boolean }) {
+  const walletType = await StorageService.getWalletType();
+  const currentAccount = await StorageService.getCurrentAccount();
+
+  if (!currentAccount) {
+    throw new Error('No account selected');
   }
 
-  // Handle EIP-712 typed data signatures (e.g., Permit)
-  if (payload.typed) {
-    try {
+  const path = payload.path || currentAccount.derivationPath;
+  if (!path) {
+    throw new Error('No derivation path found');
+  }
+
+  // Create appropriate signer
+  let signer: BaseSigner;
+  if (walletType === SignerType.LEDGER) {
+    signer = Wallet.createLedgerSigner(path);
+  } else {
+    if (!walletInstance) {
+      throw new Error('Wallet is locked');
+    }
+    signer = walletInstance.createSigner(path, SignerType.SOFTWARE);
+  }
+
+  try {
+    // Handle EIP-712 typed data signatures (e.g., Permit)
+    if (payload.typed) {
       console.log('[EIP-712] Signing typed data, raw message:', payload.message);
 
       const typedData = typeof payload.message === 'string'
@@ -418,7 +522,6 @@ async function signMessage(payload: { message: string; path: string; typed?: boo
       console.log('[EIP-712] Parsed typed data:', JSON.stringify(typedData, null, 2));
 
       // EIP-712 typed data format
-      // Handle both formats: {domain, types, message} and {domain, types, primaryType, message}
       const { domain, types, message, primaryType } = typedData;
 
       if (!domain || !types || !message) {
@@ -434,24 +537,18 @@ async function signMessage(payload: { message: string; path: string; typed?: boo
       console.log('[EIP-712] Primary type:', primaryType);
       console.log('[EIP-712] Message:', message);
 
-      const signature = await walletInstance.signTypedData(
-        domain,
-        filteredTypes,
-        message,
-        payload.path
-      );
+      const signature = await signer.signTypedData(domain, filteredTypes, message);
 
       console.log('[EIP-712] Signature created:', signature);
       return { signature };
-    } catch (error) {
-      console.error('[EIP-712] Failed to sign typed data:', error);
-      throw new Error('Failed to sign typed data: ' + (error as Error).message);
     }
-  }
 
-  // Handle regular message signatures
-  const signature = await walletInstance.signMessage(payload.message, payload.path);
-  return { signature };
+    // Handle regular message signatures
+    const signature = await signer.signMessage(payload.message);
+    return { signature };
+  } finally {
+    signer.clear();
+  }
 }
 
 /**
@@ -459,29 +556,49 @@ async function signMessage(payload: { message: string; path: string; typed?: boo
  */
 async function signTransaction(payload: {
   transaction: ethers.TransactionRequest;
-  path: string;
+  path?: string;
 }) {
-  if (!walletInstance) {
-    throw new Error('Wallet is locked');
+  const walletType = await StorageService.getWalletType();
+  const currentAccount = await StorageService.getCurrentAccount();
+
+  if (!currentAccount) {
+    throw new Error('No account selected');
   }
 
-  // Ensure transaction has the correct chain ID
-  const network = await StorageService.getCurrentNetwork();
-  if (!network) {
-    throw new Error('No network selected');
+  const path = payload.path || currentAccount.derivationPath;
+  if (!path) {
+    throw new Error('No derivation path found');
   }
 
-  const transaction = {
-    ...payload.transaction,
-    chainId: network.chainId
-  };
+  // Create appropriate signer
+  let signer: BaseSigner;
+  if (walletType === SignerType.LEDGER) {
+    signer = Wallet.createLedgerSigner(path);
+  } else {
+    if (!walletInstance) {
+      throw new Error('Wallet is locked');
+    }
+    signer = walletInstance.createSigner(path, SignerType.SOFTWARE);
+  }
 
-  const signedTx = await walletInstance.signTransaction(
-    transaction,
-    payload.path
-  );
+  try {
+    // Ensure transaction has the correct chain ID
+    const network = await StorageService.getCurrentNetwork();
+    if (!network) {
+      throw new Error('No network selected');
+    }
 
-  return { signedTransaction: signedTx };
+    const transaction = {
+      ...payload.transaction,
+      chainId: network.chainId
+    };
+
+    const signedTx = await signer.signTransaction(transaction);
+
+    return { signedTransaction: signedTx };
+  } finally {
+    signer.clear();
+  }
 }
 
 /**
@@ -489,10 +606,18 @@ async function signTransaction(payload: {
  */
 async function sendTransaction(payload: {
   transaction: ethers.TransactionRequest;
-  path: string;
+  path?: string;
 }) {
-  if (!walletInstance) {
-    throw new Error('Wallet is locked');
+  const walletType = await StorageService.getWalletType();
+  const currentAccount = await StorageService.getCurrentAccount();
+
+  if (!currentAccount) {
+    throw new Error('No account selected');
+  }
+
+  const path = payload.path || currentAccount.derivationPath;
+  if (!path) {
+    throw new Error('No derivation path found');
   }
 
   const network = await StorageService.getCurrentNetwork();
@@ -501,12 +626,6 @@ async function sendTransaction(payload: {
   }
 
   const provider = new ethers.JsonRpcProvider(network.rpcUrl);
-
-  // Get the current account to use as 'from' if not provided
-  const currentAccount = await StorageService.getCurrentAccount();
-  if (!currentAccount) {
-    throw new Error('No account selected');
-  }
 
   // Prepare transaction with all required fields
   let transaction: ethers.TransactionRequest = {
@@ -604,24 +723,36 @@ async function sendTransaction(payload: {
 
   // Get nonce if not provided
   if (transaction.nonce === undefined) {
-    transaction.nonce = await provider.getTransactionCount(transaction.from as string, 'latest');
+    transaction.nonce = await provider.getTransactionCount(currentAccount.address, 'latest');
     console.log('Nonce fetched:', transaction.nonce);
   }
 
-  const signedTx = await walletInstance.signTransaction(
-    transaction,
-    payload.path
-  );
+  // Create appropriate signer
+  let signer: BaseSigner;
+  if (walletType === SignerType.LEDGER) {
+    signer = Wallet.createLedgerSigner(path);
+  } else {
+    if (!walletInstance) {
+      throw new Error('Wallet is locked');
+    }
+    signer = walletInstance.createSigner(path, SignerType.SOFTWARE);
+  }
 
-  console.log('[Transaction] Signed, broadcasting...');
-  const txResponse = await provider.broadcastTransaction(signedTx);
-  console.log('[Transaction] Broadcast successful! Hash:', txResponse.hash);
+  try {
+    const signedTx = await signer.signTransaction(transaction);
 
-  return {
-    hash: txResponse.hash,
-    from: txResponse.from,
-    to: txResponse.to
-  };
+    console.log('[Transaction] Signed, broadcasting...');
+    const txResponse = await provider.broadcastTransaction(signedTx);
+    console.log('[Transaction] Broadcast successful! Hash:', txResponse.hash);
+
+    return {
+      hash: txResponse.hash,
+      from: txResponse.from,
+      to: txResponse.to
+    };
+  } finally {
+    signer.clear();
+  }
 }
 
 /**

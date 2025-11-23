@@ -426,6 +426,7 @@
         </p>
         <button class="button" id="create-wallet-btn">Create New Wallet</button>
         <button class="button button-secondary" id="import-wallet-btn">Import Existing Wallet</button>
+        <button class="button button-secondary" id="connect-ledger-btn" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">Connect Ledger</button>
       </div>
 
       <!-- Create Wallet Screen -->
@@ -491,6 +492,43 @@
 
         <button class="button" id="import-submit-btn">Import Wallet</button>
         <button class="button button-secondary" id="import-back-btn">Back</button>
+      </div>
+
+      <!-- Ledger Setup Screen -->
+      <div id="ledger-setup-screen" class="screen">
+        <h2 style="margin-bottom: 20px;">Connect Ledger</h2>
+
+        <div class="warning">
+          <strong>Before you begin:</strong>
+          <ul style="margin-top: 10px; margin-left: 20px;">
+            <li>Connect your Ledger device</li>
+            <li>Unlock it with your PIN</li>
+            <li>Open the Ethereum app</li>
+          </ul>
+        </div>
+
+        <div id="ledger-status" style="text-align: center; padding: 20px; background: #f7f7f7; border-radius: 8px; margin: 20px 0; display: none;">
+          <div class="spinner" style="margin: 0 auto 10px;"></div>
+          <p id="ledger-status-text">Connecting to Ledger...</p>
+        </div>
+
+        <div id="ledger-accounts" style="display: none;">
+          <h3 style="margin: 20px 0 10px;">Select Accounts</h3>
+          <p style="color: #888; font-size: 13px; margin-bottom: 15px;">Choose which accounts you want to use</p>
+          <div id="ledger-accounts-list"></div>
+        </div>
+
+        <div class="input-group" id="ledger-password-group" style="display: none;">
+          <label for="ledger-password">Wallet Password</label>
+          <input type="password" id="ledger-password" placeholder="Enter a password to secure your wallet">
+          <p style="font-size: 12px; color: #888; margin-top: 5px;">This password will be used to unlock your wallet in this extension</p>
+        </div>
+
+        <div id="ledger-error" class="error hidden"></div>
+
+        <button class="button" id="ledger-connect-btn">Connect Device</button>
+        <button class="button" id="ledger-submit-btn" style="display: none;">Complete Setup</button>
+        <button class="button button-secondary" id="ledger-back-btn">Back</button>
       </div>
 
       <!-- Unlock Screen -->

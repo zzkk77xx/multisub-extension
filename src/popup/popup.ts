@@ -46,6 +46,10 @@ function setupEventListeners() {
     showScreen('import-wallet-screen');
   });
 
+  document.getElementById('connect-ledger-btn')?.addEventListener('click', () => {
+    showScreen('ledger-setup-screen');
+  });
+
   // Create wallet
   document.getElementById('create-submit-btn')?.addEventListener('click', handleCreateWallet);
   document.getElementById('create-back-btn')?.addEventListener('click', () => {
@@ -62,6 +66,13 @@ function setupEventListeners() {
   // Import wallet
   document.getElementById('import-submit-btn')?.addEventListener('click', handleImportWallet);
   document.getElementById('import-back-btn')?.addEventListener('click', () => {
+    showScreen('welcome-screen');
+  });
+
+  // Ledger setup
+  document.getElementById('ledger-connect-btn')?.addEventListener('click', handleLedgerConnect);
+  document.getElementById('ledger-submit-btn')?.addEventListener('click', handleLedgerSubmit);
+  document.getElementById('ledger-back-btn')?.addEventListener('click', () => {
     showScreen('welcome-screen');
   });
 
@@ -1213,6 +1224,200 @@ async function handleRemoveDeFiConfig(chainId: number) {
 
 // Make handleRemoveDeFiConfig globally accessible
 (window as any).handleRemoveDeFiConfig = handleRemoveDeFiConfig;
+
+/**
+ * Ledger state
+ */
+let ledgerAccounts: any[] = [];
+let selectedLedgerAccounts: Set<number> = new Set();
+
+/**
+ * Handle Ledger device connection
+ */
+async function handleLedgerConnect() {
+  try {
+    // Show status
+    const statusDiv = document.getElementById('ledger-status');
+    const statusText = document.getElementById('ledger-status-text');
+    const errorDiv = document.getElementById('ledger-error');
+    const connectBtn = document.getElementById('ledger-connect-btn') as HTMLButtonElement;
+
+    if (!statusDiv || !statusText || !errorDiv) return;
+
+    errorDiv.classList.add('hidden');
+    statusDiv.style.display = 'block';
+    connectBtn.disabled = true;
+    statusText.textContent = 'Requesting device permission...';
+
+    // Check if WebHID is supported
+    const supported = await sendMessage<{ supported: boolean }>('LEDGER_CHECK_SUPPORT');
+    if (!supported.supported) {
+      throw new Error('Ledger is not supported in this browser. Please use Chrome or Edge.');
+    }
+
+    // Request device
+    statusText.textContent = 'Please select your Ledger device...';
+    const deviceGranted = await sendMessage<boolean>('LEDGER_REQUEST_DEVICE');
+
+    if (!deviceGranted) {
+      throw new Error('Device permission denied. Please try again and select your Ledger device.');
+    }
+
+    // Derive addresses
+    statusText.textContent = 'Reading addresses from device...\nPlease confirm on your Ledger if prompted.';
+    const accounts = await sendMessage<any[]>('LEDGER_DERIVE_ADDRESSES', {
+      basePath: "m/44'/60'/0'/0",
+      count: 5
+    });
+
+    ledgerAccounts = accounts.map((acc, index) => ({
+      ...acc,
+      index,
+      publicKey: '',
+      signerType: 'ledger'
+    }));
+
+    // Show accounts
+    displayLedgerAccounts();
+    statusDiv.style.display = 'none';
+    document.getElementById('ledger-accounts')!.style.display = 'block';
+    document.getElementById('ledger-password-group')!.style.display = 'block';
+    document.getElementById('ledger-submit-btn')!.style.display = 'block';
+    connectBtn.style.display = 'none';
+
+  } catch (error) {
+    const errorDiv = document.getElementById('ledger-error');
+    const statusDiv = document.getElementById('ledger-status');
+    const connectBtn = document.getElementById('ledger-connect-btn') as HTMLButtonElement;
+
+    if (errorDiv) {
+      errorDiv.textContent = (error as Error).message;
+      errorDiv.classList.remove('hidden');
+    }
+
+    if (statusDiv) {
+      statusDiv.style.display = 'none';
+    }
+
+    connectBtn.disabled = false;
+    console.error('Ledger connection failed:', error);
+  }
+}
+
+/**
+ * Display Ledger accounts for selection
+ */
+function displayLedgerAccounts() {
+  const accountsList = document.getElementById('ledger-accounts-list');
+  if (!accountsList) return;
+
+  accountsList.innerHTML = '';
+
+  ledgerAccounts.forEach((account, index) => {
+    const accountDiv = document.createElement('div');
+    accountDiv.style.cssText = 'background: #f7f7f7; border-radius: 8px; padding: 12px; margin-bottom: 10px; display: flex; align-items: center; cursor: pointer;';
+    accountDiv.innerHTML = `
+      <input type="checkbox" id="ledger-account-${index}" value="${index}" style="margin-right: 12px; cursor: pointer;">
+      <div style="flex: 1;">
+        <div style="font-weight: 600; margin-bottom: 4px;">Account ${index + 1}</div>
+        <div style="font-size: 12px; color: #888; font-family: monospace;">${account.address}</div>
+        <div style="font-size: 11px; color: #aaa; margin-top: 2px;">${account.path}</div>
+      </div>
+    `;
+
+    const checkbox = accountDiv.querySelector('input[type="checkbox"]') as HTMLInputElement;
+
+    // Select first account by default
+    if (index === 0) {
+      checkbox.checked = true;
+      selectedLedgerAccounts.add(index);
+    }
+
+    accountDiv.addEventListener('click', (e) => {
+      if (e.target !== checkbox) {
+        checkbox.checked = !checkbox.checked;
+        checkbox.dispatchEvent(new Event('change'));
+      }
+    });
+
+    checkbox.addEventListener('change', (e) => {
+      e.stopPropagation();
+      if (checkbox.checked) {
+        selectedLedgerAccounts.add(index);
+      } else {
+        selectedLedgerAccounts.delete(index);
+      }
+    });
+
+    accountsList.appendChild(accountDiv);
+  });
+}
+
+/**
+ * Handle Ledger wallet creation
+ */
+async function handleLedgerSubmit() {
+  try {
+    const errorDiv = document.getElementById('ledger-error');
+    const passwordInput = document.getElementById('ledger-password') as HTMLInputElement;
+
+    if (!errorDiv || !passwordInput) return;
+
+    errorDiv.classList.add('hidden');
+
+    // Validate
+    if (selectedLedgerAccounts.size === 0) {
+      throw new Error('Please select at least one account');
+    }
+
+    const password = passwordInput.value.trim();
+    if (!password) {
+      throw new Error('Please enter a password');
+    }
+
+    if (password.length < 8) {
+      throw new Error('Password must be at least 8 characters');
+    }
+
+    // Get selected accounts
+    const accounts = Array.from(selectedLedgerAccounts)
+      .map(index => ledgerAccounts[index])
+      .sort((a, b) => a.index - b.index);
+
+    // Create Ledger wallet
+    const submitBtn = document.getElementById('ledger-submit-btn') as HTMLButtonElement;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Setting up...';
+
+    await sendMessage('CREATE_LEDGER_WALLET', {
+      password,
+      accounts
+    });
+
+    // Load wallet data and show wallet screen
+    await loadWalletData();
+    showScreen('wallet-screen');
+
+    // Reset
+    selectedLedgerAccounts.clear();
+    ledgerAccounts = [];
+
+  } catch (error) {
+    const errorDiv = document.getElementById('ledger-error');
+    if (errorDiv) {
+      errorDiv.textContent = (error as Error).message;
+      errorDiv.classList.remove('hidden');
+    }
+
+    const submitBtn = document.getElementById('ledger-submit-btn') as HTMLButtonElement;
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Complete Setup';
+    }
+
+    console.error('Ledger wallet creation failed:', error);
+  }
+}
 
 // Initialize on load
 document.addEventListener('DOMContentLoaded', initialize);

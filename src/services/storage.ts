@@ -1,11 +1,13 @@
 import { CryptoService } from "../core/crypto";
 import { WalletAccount } from "../core/wallet";
+import { SignerAccount, SignerType } from "../signers";
 
 export interface StoredWallet {
-  encryptedMnemonic: string;
-  accounts: WalletAccount[];
+  encryptedMnemonic?: string; // Optional - not needed for hardware wallets
+  accounts: (WalletAccount | SignerAccount)[];
   passwordHash: string;
   createdAt: number;
+  walletType: SignerType; // Type of wallet (software, ledger, etc.)
 }
 
 export interface Network {
@@ -67,6 +69,7 @@ export class StorageService {
       accounts,
       passwordHash,
       createdAt: Date.now(),
+      walletType: SignerType.SOFTWARE,
     };
 
     await chrome.storage.local.set({ [this.WALLET_KEY]: wallet });
@@ -95,11 +98,54 @@ export class StorageService {
   }
 
   /**
+   * Initialize Ledger wallet (no mnemonic needed)
+   */
+  static async createLedgerWallet(
+    password: string,
+    accounts: SignerAccount[]
+  ): Promise<void> {
+    const passwordHash = await CryptoService.hash(password);
+
+    const wallet: StoredWallet = {
+      accounts,
+      passwordHash,
+      createdAt: Date.now(),
+      walletType: SignerType.LEDGER,
+    };
+
+    await chrome.storage.local.set({ [this.WALLET_KEY]: wallet });
+
+    // Initialize session (no mnemonic needed for Ledger)
+    const sessionPassword = CryptoService.generateSessionPassword();
+    await chrome.storage.session.set({
+      [this.SESSION_PASSWORD_KEY]: sessionPassword,
+    });
+
+    // Initialize default state
+    await this.setState({
+      isLocked: false,
+      currentAccount: 0,
+      currentNetwork: 0,
+    });
+
+    // Initialize default networks
+    await this.initializeDefaultNetworks();
+  }
+
+  /**
    * Get stored wallet
    */
   static async getWallet(): Promise<StoredWallet | null> {
     const result = await chrome.storage.local.get(this.WALLET_KEY);
     return result[this.WALLET_KEY] || null;
+  }
+
+  /**
+   * Get wallet type
+   */
+  static async getWalletType(): Promise<SignerType | null> {
+    const wallet = await this.getWallet();
+    return wallet?.walletType || null;
   }
 
   /**
@@ -114,6 +160,10 @@ export class StorageService {
     const passwordHash = await CryptoService.hash(password);
     if (passwordHash !== wallet.passwordHash) {
       throw new Error("Invalid password");
+    }
+
+    if (!wallet.encryptedMnemonic) {
+      throw new Error("No mnemonic found in wallet (this might be a hardware wallet)");
     }
 
     try {
@@ -501,7 +551,7 @@ export class StorageService {
   /**
    * Set wallet state
    */
-  private static async setState(state: WalletState): Promise<void> {
+  static async setState(state: WalletState): Promise<void> {
     await chrome.storage.local.set({ [this.STATE_KEY]: state });
   }
 

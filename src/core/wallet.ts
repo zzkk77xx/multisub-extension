@@ -2,12 +2,13 @@ import * as bip39 from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { HDKey } from '@scure/bip32';
 import { ethers } from 'ethers';
+import { BaseSigner, SoftwareSigner, LedgerSigner, SignerType } from '../signers';
 
 export interface WalletAccount {
   address: string;
   derivationPath: string;
   index: number;
-  publicKey: string;
+  publicKey?: string;
 }
 
 export class Wallet {
@@ -143,5 +144,26 @@ export class Wallet {
   clear(): void {
     this.hdKey = null;
     this.mnemonic = '';
+  }
+
+  /**
+   * Create a signer for a specific account
+   * Returns appropriate signer based on account type
+   */
+  createSigner(path: string, signerType: SignerType = SignerType.SOFTWARE): BaseSigner {
+    if (signerType === SignerType.LEDGER) {
+      return new LedgerSigner(path);
+    }
+
+    // Default: Software signer
+    const privateKey = this.getPrivateKey(path);
+    return new SoftwareSigner(privateKey);
+  }
+
+  /**
+   * Create a Ledger signer for a specific derivation path
+   */
+  static createLedgerSigner(path: string): LedgerSigner {
+    return new LedgerSigner(path);
   }
 }

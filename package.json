@@ -35,6 +35,7 @@
     "css-loader": "^6.8.1",
     "dotenv": "^17.2.3",
     "html-webpack-plugin": "^5.5.4",
+    "sharp": "^0.34.5",
     "style-loader": "^3.3.3",
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",

@@ -15,7 +15,7 @@ interface ProviderRpcError extends Error {
 
 class EthereumProvider {
   public isMetaMask: boolean = true; // Spoof MetaMask for compatibility
-  public isCryptoWallet: boolean = true;
+  public isMultiSub: boolean = true;
   public chainId: string | null = null;
   public selectedAddress: string | null = null;
   public networkVersion: string | null = null;
@@ -45,7 +45,7 @@ class EthereumProvider {
     window.addEventListener('message', (event) => {
       if (event.source !== window) return;
 
-      if (event.data?.type === 'CRYPTO_WALLET_RESPONSE') {
+      if (event.data?.type === 'MULTISUB_RESPONSE') {
         const { id, response } = event.data;
         const pending = this.pendingRequests.get(id);
 
@@ -61,10 +61,10 @@ class EthereumProvider {
       }
 
       // Listen for spoof config updates
-      if (event.data?.type === 'CRYPTO_WALLET_SPOOF_CONFIG_UPDATE') {
+      if (event.data?.type === 'MULTISUB_SPOOF_CONFIG_UPDATE') {
         const oldConfig = this.spoofConfig;
         this.spoofConfig = event.data.config;
-        console.log('[Crypto Wallet] Spoof config updated:', this.spoofConfig);
+        console.log('[MultiSub] Spoof config updated:', this.spoofConfig);
 
         // If config changed and we have a real address, update selected address
         if (this.realAddress) {
@@ -72,7 +72,7 @@ class EthereumProvider {
           if (newDisplayAddress !== this.selectedAddress) {
             this.selectedAddress = newDisplayAddress;
             this.emit('accountsChanged', [this.selectedAddress]);
-            console.log('[Crypto Wallet] Display address changed to:', this.selectedAddress);
+            console.log('[MultiSub] Display address changed to:', this.selectedAddress);
           }
         }
       }
@@ -81,7 +81,7 @@ class EthereumProvider {
     // Fetch spoof config
     try {
       this.spoofConfig = await this.sendMessage('GET_ADDRESS_SPOOF_CONFIG');
-      console.log('[Crypto Wallet] Address spoof config:', this.spoofConfig);
+      console.log('[MultiSub] Address spoof config:', this.spoofConfig);
     } catch {
       this.spoofConfig = { enabled: false, spoofedAddress: '' };
     }
@@ -114,7 +114,7 @@ class EthereumProvider {
       this.pendingRequests.set(id, { resolve, reject });
 
       window.postMessage({
-        type: `CRYPTO_WALLET_${type}`,
+        type: `MULTISUB_${type}`,
         payload,
         id
       }, '*');
@@ -146,7 +146,7 @@ class EthereumProvider {
    */
   private getDisplayAddress(): string | null {
     if (this.spoofConfig.enabled && this.spoofConfig.spoofedAddress) {
-      console.log('[Crypto Wallet] Using spoofed address:', this.spoofConfig.spoofedAddress, 'instead of real:', this.realAddress);
+      console.log('[MultiSub] Using spoofed address:', this.spoofConfig.spoofedAddress, 'instead of real:', this.realAddress);
       return this.spoofConfig.spoofedAddress;
     }
     return this.realAddress;
@@ -346,26 +346,26 @@ class EthereumProvider {
   }
 }
 
-console.log('[Crypto Wallet] Inject script starting...');
+console.log('[MultiSub] Inject script starting...');
 
 // Store reference to any existing provider (e.g., MetaMask)
 const existingProvider = (window as any).ethereum;
 if (existingProvider) {
-  console.log('[Crypto Wallet] Found existing provider:', existingProvider);
+  console.log('[MultiSub] Found existing provider:', existingProvider);
 }
 
 // Inject provider (overwrite MetaMask if present)
 const provider = new EthereumProvider();
-console.log('[Crypto Wallet] Provider instance created');
+console.log('[MultiSub] Provider instance created');
 
 // Aggressively take over window.ethereum
 const setupProvider = () => {
   try {
     // Try to delete existing property first
     delete (window as any).ethereum;
-    console.log('[Crypto Wallet] Deleted existing ethereum property');
+    console.log('[MultiSub] Deleted existing ethereum property');
   } catch (e) {
-    console.log('[Crypto Wallet] Could not delete existing property (probably locked)');
+    console.log('[MultiSub] Could not delete existing property (probably locked)');
   }
 
   try {
@@ -375,38 +375,38 @@ const setupProvider = () => {
         return provider;
       },
       set(_newProvider) {
-        console.warn('[Crypto Wallet] Blocked attempt to overwrite ethereum provider');
+        console.warn('[MultiSub] Blocked attempt to overwrite ethereum provider');
       },
       configurable: false
     });
 
     // VERIFY it actually worked
-    if ((window as any).ethereum?.isCryptoWallet) {
-      console.log('[Crypto Wallet] Successfully defined ethereum property');
+    if ((window as any).ethereum?.isMultiSub) {
+      console.log('[MultiSub] Successfully defined ethereum property');
       return; // Success, exit function
     } else {
-      console.warn('[Crypto Wallet] Object.defineProperty succeeded but did not replace provider');
+      console.warn('[MultiSub] Object.defineProperty succeeded but did not replace provider');
       throw new Error('Provider not replaced');
     }
   } catch (e) {
     // If we can't define the property, it's already locked by MetaMask
-    console.warn('[Crypto Wallet] Could not define property, trying to hijack existing provider...');
+    console.warn('[MultiSub] Could not define property, trying to hijack existing provider...');
 
     // Plan B: Mutate the existing provider object in place
-    console.log('[Crypto Wallet] Attempting to hijack existing provider by mutation...');
+    console.log('[MultiSub] Attempting to hijack existing provider by mutation...');
     const existingEthereum = (window as any).ethereum;
 
     // Copy all our provider's properties/methods to the existing object
     try {
       // Add our identifier
-      existingEthereum.isCryptoWallet = true;
+      existingEthereum.isMultiSub = true;
 
       // Store original request method (not used but good to have)
       const _originalRequest = existingEthereum.request?.bind(existingEthereum);
 
       // Override the request method to redirect to our provider
       existingEthereum.request = function(args: any) {
-        console.log('[Crypto Wallet] Intercepted request:', args.method);
+        console.log('[MultiSub] Intercepted request:', args.method);
         return provider.request(args);
       };
 
@@ -419,24 +419,24 @@ const setupProvider = () => {
       }
 
       // Verify it worked
-      if ((window as any).ethereum?.isCryptoWallet) {
-        console.log('[Crypto Wallet] ✅ Successfully hijacked existing provider!');
+      if ((window as any).ethereum?.isMultiSub) {
+        console.log('[MultiSub] ✅ Successfully hijacked existing provider!');
         return; // Success
       } else {
-        throw new Error('Mutation failed to set isCryptoWallet');
+        throw new Error('Mutation failed to set isMultiSub');
       }
     } catch (e2) {
-      console.error('[Crypto Wallet] Mutation failed:', e2);
+      console.error('[MultiSub] Mutation failed:', e2);
 
       // Plan C: Last resort - wrap the entire ethereum object in our own Proxy
-      console.warn('[Crypto Wallet] Using Proxy wrapper as last resort...');
+      console.warn('[MultiSub] Using Proxy wrapper as last resort...');
       try {
         // We can't replace window.ethereum, but we can document our presence
-        (window as any).cryptoWalletProvider = provider;
-        console.log('[Crypto Wallet] Provider available at window.cryptoWalletProvider');
-        console.warn('[Crypto Wallet] ⚠️ Could not override MetaMask. To use this wallet, disable MetaMask extension.');
+        (window as any).multiSubProvider = provider;
+        console.log('[MultiSub] Provider available at window.multiSubProvider');
+        console.warn('[MultiSub] ⚠️ Could not override MetaMask. To use this wallet, disable MetaMask extension.');
       } catch (e3) {
-        console.error('[Crypto Wallet] All override attempts failed!', e3);
+        console.error('[MultiSub] All override attempts failed!', e3);
       }
     }
   }
@@ -444,19 +444,19 @@ const setupProvider = () => {
 
 // Setup immediately
 setupProvider();
-console.log('[Crypto Wallet] Provider setup complete');
-console.log('[Crypto Wallet] Checking: window.ethereum =', (window as any).ethereum);
-console.log('[Crypto Wallet] Checking: window.ethereum.isCryptoWallet =', (window as any).ethereum?.isCryptoWallet);
-console.log('[Crypto Wallet] Checking: window.ethereum.isMetaMask =', (window as any).ethereum?.isMetaMask);
+console.log('[MultiSub] Provider setup complete');
+console.log('[MultiSub] Checking: window.ethereum =', (window as any).ethereum);
+console.log('[MultiSub] Checking: window.ethereum.isMultiSub =', (window as any).ethereum?.isMultiSub);
+console.log('[MultiSub] Checking: window.ethereum.isMetaMask =', (window as any).ethereum?.isMetaMask);
 
 // Verify provider is set correctly after a delay
 setTimeout(() => {
   const currentProvider = (window as any).ethereum;
-  if (currentProvider?.isCryptoWallet) {
-    console.log('[Crypto Wallet] ✅ Provider successfully installed!');
+  if (currentProvider?.isMultiSub) {
+    console.log('[MultiSub] ✅ Provider successfully installed!');
   } else {
-    console.warn('[Crypto Wallet] ⚠️ Provider may not be correctly installed');
-    console.log('[Crypto Wallet] Current provider:', currentProvider);
+    console.warn('[MultiSub] ⚠️ Provider may not be correctly installed');
+    console.log('[MultiSub] Current provider:', currentProvider);
   }
 }, 1000);
 
@@ -466,10 +466,10 @@ window.dispatchEvent(new Event('ethereum#initialized'));
 // EIP-6963: Announce wallet
 const announceProvider = () => {
   const info = {
-    uuid: 'crypto-wallet-uuid',
-    name: 'Crypto Wallet',
+    uuid: 'multisub-uuid',
+    name: 'MultiSub',
     icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><text y="24" font-size="24">💰</text></svg>',
-    rdns: 'com.cryptowallet'
+    rdns: 'com.multisub'
   };
 
   window.dispatchEvent(
@@ -483,7 +483,7 @@ const announceProvider = () => {
 announceProvider();
 window.addEventListener('eip6963:requestProvider', announceProvider);
 
-console.log('[Crypto Wallet] Provider injected and locked', existingProvider ? '(replaced existing provider)' : '');
+console.log('[MultiSub] Provider injected and locked', existingProvider ? '(replaced existing provider)' : '');
 
 // Export to make this a module
 export {};

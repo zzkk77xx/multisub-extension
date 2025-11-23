@@ -3,7 +3,7 @@
  * Runs in an isolated world with access to chrome APIs
  */
 
-console.log('[Crypto Wallet] Content script starting...');
+console.log('[MultiSub] Content script starting...');
 
 // Inject the provider script into the page ASAP
 function injectProvider() {
@@ -11,21 +11,21 @@ function injectProvider() {
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL('inject.js');
     script.onload = function() {
-      console.log('[Crypto Wallet] Provider script loaded');
+      console.log('[MultiSub] Provider script loaded');
       script.remove();
     };
     script.onerror = function(error) {
-      console.error('[Crypto Wallet] Failed to load provider script:', error);
+      console.error('[MultiSub] Failed to load provider script:', error);
     };
 
     const target = document.head || document.documentElement;
     if (target) {
       target.insertBefore(script, target.firstChild);
     } else {
-      console.error('[Crypto Wallet] No injection target found');
+      console.error('[MultiSub] No injection target found');
     }
   } catch (error) {
-    console.error('[Crypto Wallet] Injection error:', error);
+    console.error('[MultiSub] Injection error:', error);
   }
 }
 
@@ -40,26 +40,26 @@ window.addEventListener('message', async (event) => {
   if (event.source !== window) return;
 
   // Only process our provider messages
-  if (event.data?.type?.startsWith('CRYPTO_WALLET_')) {
+  if (event.data?.type?.startsWith('MULTISUB_')) {
     const { type, payload, id } = event.data;
 
     try {
       // Forward to background script
       const response = await chrome.runtime.sendMessage({
-        type: type.replace('CRYPTO_WALLET_', ''),
+        type: type.replace('MULTISUB_', ''),
         payload
       });
 
       // Send response back to page
       window.postMessage({
-        type: 'CRYPTO_WALLET_RESPONSE',
+        type: 'MULTISUB_RESPONSE',
         id,
         response
       }, '*');
     } catch (error) {
       // Send error back to page
       window.postMessage({
-        type: 'CRYPTO_WALLET_RESPONSE',
+        type: 'MULTISUB_RESPONSE',
         id,
         response: {
           success: false,
@@ -75,12 +75,12 @@ window.addEventListener('message', async (event) => {
  */
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName === 'local' && changes.addressSpoof) {
-    console.log('[Crypto Wallet] Spoof config changed, notifying page');
+    console.log('[MultiSub] Spoof config changed, notifying page');
     window.postMessage({
-      type: 'CRYPTO_WALLET_SPOOF_CONFIG_UPDATE',
+      type: 'MULTISUB_SPOOF_CONFIG_UPDATE',
       config: changes.addressSpoof.newValue
     }, '*');
   }
 });
 
-console.log('Crypto Wallet content script loaded');
+console.log('MultiSub content script loaded');

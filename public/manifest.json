@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Crypto Wallet",
+  "name": "MultiSub",
   "version": "1.0.0",
-  "description": "A secure multi-chain cryptocurrency wallet",
+  "description": "A secure multi-account wallet with multi-chain support",
   "permissions": [
     "storage",
     "unlimitedStorage",

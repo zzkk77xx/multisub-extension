@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Test Crypto Wallet</title>
+  <title>Test MultiSub</title>
   <style>
     * {
       margin: 0;
@@ -193,7 +193,7 @@
 </head>
 <body>
   <div class="container">
-    <h1>Test DApp - Crypto Wallet</h1>
+    <h1>Test DApp - MultiSub</h1>
     <p class="subtitle">Testez votre extension de wallet crypto</p>
 
     <div class="warning">
@@ -427,7 +427,7 @@
 
         const info = {
           'isMetaMask': window.ethereum.isMetaMask,
-          'isCryptoWallet': window.ethereum.isCryptoWallet,
+          'isMultiSub': window.ethereum.isMultiSub,
           'chainId': await window.ethereum.request({ method: 'eth_chainId' }),
           'networkVersion': window.ethereum.networkVersion,
         };

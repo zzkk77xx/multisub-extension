@@ -1225,4 +1225,4 @@ async function handleAddChain(chainParams: {
   return newNetwork;
 }
 
-console.log('Crypto Wallet background service worker initialized');
+console.log('MultiSub background service worker initialized');

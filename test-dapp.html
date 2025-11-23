@@ -274,6 +274,41 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Test Aave V3 Supply</div>
+      <div class="input-group">
+        <label for="aave-token-address">Adresse du token à déposer:</label>
+        <input type="text" id="aave-token-address" placeholder="0x..." value="0x29f2D40B0605204364af54EC677bD022dA425d03">
+        <small style="color: #888;">Exemple: WBTC Sepolia</small>
+      </div>
+      <div class="input-group">
+        <label for="aave-pool-address">Adresse Aave Pool:</label>
+        <input type="text" id="aave-pool-address" placeholder="0x..." value="0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951">
+        <small style="color: #888;">Aave V3 Pool Sepolia</small>
+      </div>
+      <div class="input-group">
+        <label for="aave-amount">Montant à déposer:</label>
+        <input type="text" id="aave-amount" placeholder="0.01" value="0.01">
+      </div>
+      <div class="grid">
+        <button class="button button-secondary" onclick="checkAavePosition()" id="check-aave-btn" disabled>Vérifier Position Aave</button>
+        <button class="button button-secondary" onclick="approveAavePool()" id="approve-aave-btn" disabled>Approuver Aave Pool</button>
+        <button class="button" onclick="supplyToAave()" id="supply-aave-btn" disabled>Déposer sur Aave</button>
+      </div>
+      <div id="aave-position" style="background: #f7f7f7; border-radius: 8px; padding: 15px; margin-top: 15px; display: none;">
+        <div style="font-weight: 600; margin-bottom: 10px;">Position Aave:</div>
+        <div style="font-family: 'Courier New', monospace; font-size: 13px;">
+          <div>Collateral Total: <span id="aave-collateral">-</span> USD</div>
+          <div>Dette Totale: <span id="aave-debt">-</span> USD</div>
+          <div>Health Factor: <span id="aave-health">-</span></div>
+        </div>
+      </div>
+      <p style="color: #888; font-size: 12px; margin-top: 10px;">
+        Testez le dépôt sur Aave V3. Le processus inclut l'approbation du token puis le dépôt.<br>
+        Note: Nécessite des tokens de test sur Sepolia
+      </p>
+    </div>
+
+    <div class="section">
       <div class="section-title">Informations du Provider</div>
       <button class="button button-secondary" onclick="getProviderInfo()">Récupérer les infos</button>
     </div>
@@ -330,6 +365,9 @@
       document.getElementById('send-btn').disabled = true;
       document.getElementById('check-balance-btn').disabled = true;
       document.getElementById('transfer-btn').disabled = true;
+      document.getElementById('check-aave-btn').disabled = true;
+      document.getElementById('approve-aave-btn').disabled = true;
+      document.getElementById('supply-aave-btn').disabled = true;
       log('🔌 Déconnecté');
     }
 
@@ -523,7 +561,209 @@
         document.getElementById('send-btn').disabled = false;
         document.getElementById('check-balance-btn').disabled = false;
         document.getElementById('transfer-btn').disabled = false;
+        document.getElementById('check-aave-btn').disabled = false;
+        document.getElementById('approve-aave-btn').disabled = false;
+        document.getElementById('supply-aave-btn').disabled = false;
         log(`🔄 Compte changé: ${currentAccount}`);
+      }
+    }
+
+    // Aave V3 functions
+    async function checkAavePosition() {
+      if (!currentAccount) {
+        log('❌ Connectez d\'abord votre wallet', 'error');
+        return;
+      }
+
+      try {
+        const aavePoolAddress = document.getElementById('aave-pool-address').value;
+        if (!aavePoolAddress || !aavePoolAddress.startsWith('0x')) {
+          log('❌ Adresse Aave Pool invalide', 'error');
+          return;
+        }
+
+        log('🔍 Vérification de la position Aave...');
+
+        // Aave V3 Pool ABI: getUserAccountData(address)
+        // Function selector: 0xbf92857c
+        const getUserAccountDataSelector = '0xbf92857c';
+        const accountData = getUserAccountDataSelector + currentAccount.slice(2).padStart(64, '0');
+
+        const result = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: aavePoolAddress,
+            data: accountData
+          }, 'latest']
+        });
+
+        // Parse result (6 uint256 values)
+        const totalCollateralBase = BigInt('0x' + result.slice(2, 66));
+        const totalDebtBase = BigInt('0x' + result.slice(66, 130));
+        const availableBorrowsBase = BigInt('0x' + result.slice(130, 194));
+        const currentLiquidationThreshold = BigInt('0x' + result.slice(194, 258));
+        const ltv = BigInt('0x' + result.slice(258, 322));
+        const healthFactor = BigInt('0x' + result.slice(322, 386));
+
+        // Format values (Aave uses 8 decimals for USD values)
+        const collateralUSD = (Number(totalCollateralBase) / 1e8).toFixed(2);
+        const debtUSD = (Number(totalDebtBase) / 1e8).toFixed(2);
+        const healthFactorFormatted = healthFactor > 0n
+          ? (Number(healthFactor) / 1e18).toFixed(2)
+          : '∞';
+
+        // Update UI
+        document.getElementById('aave-collateral').textContent = collateralUSD;
+        document.getElementById('aave-debt').textContent = debtUSD;
+        document.getElementById('aave-health').textContent = healthFactorFormatted;
+        document.getElementById('aave-position').style.display = 'block';
+
+        log(`✅ Position Aave récupérée:\n  Collateral: ${collateralUSD} USD\n  Debt: ${debtUSD} USD\n  Health Factor: ${healthFactorFormatted}`, 'success');
+      } catch (error) {
+        log(`❌ Erreur: ${error.message}`, 'error');
+        console.error('Aave position error:', error);
+      }
+    }
+
+    async function approveAavePool() {
+      if (!currentAccount) {
+        log('❌ Connectez d\'abord votre wallet', 'error');
+        return;
+      }
+
+      try {
+        const tokenAddress = document.getElementById('aave-token-address').value;
+        const aavePoolAddress = document.getElementById('aave-pool-address').value;
+        const amount = document.getElementById('aave-amount').value;
+
+        if (!tokenAddress || !tokenAddress.startsWith('0x')) {
+          log('❌ Adresse de token invalide', 'error');
+          return;
+        }
+
+        if (!aavePoolAddress || !aavePoolAddress.startsWith('0x')) {
+          log('❌ Adresse Aave Pool invalide', 'error');
+          return;
+        }
+
+        log(`📝 Approbation du token pour Aave Pool...`);
+
+        // Get token decimals
+        const decimalsData = '0x313ce567'; // decimals()
+        const decimalsResult = await window.ethereum.request({
+          method: 'eth_call',
+          params: [{
+            to: tokenAddress,
+            data: decimalsData
+          }, 'latest']
+        });
+
+        const decimals = parseInt(decimalsResult, 16);
+        const amountInWei = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
+
+        // ERC20 approve function: approve(address,uint256)
+        // Function selector: 0x095ea7b3
+        const approveData =
+          '0x095ea7b3' +
+          aavePoolAddress.slice(2).padStart(64, '0') +
+          amountInWei.toString(16).padStart(64, '0');
+
+        log(`  Montant: ${amount} (${amountInWei.toString()} wei)\n  Spender: ${aavePoolAddress}`);
+
+        const txHash = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: currentAccount,
+            to: tokenAddress,
+            data: approveData,
+            value: '0x0'
+          }]
+        });
+
+        log(`✅ Approbation envoyée!\nHash: ${txHash}`, 'success');
+      } catch (error) {
+        log(`❌ Erreur: ${error.message}`, 'error');
+        console.error('Approve error:', error);
+      }
+    }
+
+    async function supplyToAave() {
+      if (!currentAccount) {
+        log('❌ Connectez d\'abord votre wallet', 'error');
+        return;
+      }
+
+      try {
+        const tokenAddress = document.getElementById('aave-token-address').value;
+        const aavePoolAddress = document.getElementById('aave-pool-address').value;
+        const amount = document.getElementById('aave-amount').value;
+        const moduleAddress = '0x42FBd804C677324c4b711Fce26Ee8226702B389A'; // DeFi Interactor Module
+
+        if (!tokenAddress || !tokenAddress.startsWith('0x')) {
+          log('❌ Adresse de token invalide', 'error');
+          return;
+        }
+
+        if (!aavePoolAddress || !aavePoolAddress.startsWith('0x')) {
+          log('❌ Adresse Aave Pool invalide', 'error');
+          return;
+        }
+
+        log(`💰 Dépôt sur Aave V3 via Module...`);
+
+        const decimals = 8; // parseInt(decimalsResult, 16);
+        const amountInWei = BigInt(Math.floor(parseFloat(amount) * Math.pow(10, decimals)));
+
+        // Step 1: Encode Aave supply call
+        // supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode)
+        // Function selector: 0x617ba037
+        const aaveSupplyData =
+          '0x617ba037' +
+          tokenAddress.slice(2).padStart(64, '0') +           // asset
+          amountInWei.toString(16).padStart(64, '0') +         // amount
+          currentAccount.slice(2).padStart(64, '0') +          // onBehalfOf
+          '0'.padStart(64, '0');                               // referralCode (0)
+
+        // Step 2: Encode executeOnProtocol call
+        // executeOnProtocol(address target, bytes calldata data)
+        // Function selector: 0x18c0bb0e
+        const aaveSupplyBytes = aaveSupplyData.slice(2); // Remove 0x
+        const bytesLength = (aaveSupplyBytes.length / 2).toString(16).padStart(64, '0');
+
+        const executeData =
+          '0x18c0bb0e' +                                       // executeOnProtocol selector
+          aavePoolAddress.slice(2).padStart(64, '0') +         // target (Aave Pool)
+          '0000000000000000000000000000000000000000000000000000000000000040' + // offset to bytes (64)
+          bytesLength +                                        // length of bytes data
+          aaveSupplyBytes +                                    // the Aave supply call data
+          (aaveSupplyBytes.length % 64 !== 0 ? '0'.repeat(64 - (aaveSupplyBytes.length % 64)) : ''); // padding
+
+        log(`  Module: ${moduleAddress}\n  Token: ${tokenAddress}\n  Montant: ${amount} (${amountInWei.toString()} wei)\n  Destinataire: ${currentAccount}`);
+
+        const txHash = await window.ethereum.request({
+          method: 'eth_sendTransaction',
+          params: [{
+            from: "0x7edA8eE795988aC0FfC5C6A50B2C6798613900BB",
+            to: moduleAddress,  // Call module instead of Aave
+            data: executeData,
+            value: '0x0'
+          }]
+        }).catch(error => {
+          log(`❌ Erreur: ${error.message}`, 'error');
+          console.error('Supply error:', error);
+        });
+
+        log(`✅ Dépôt Aave envoyé via Module!\nHash: ${txHash}\n\nAttendez la confirmation puis vérifiez votre position avec "Vérifier Position Aave"`, 'success');
+
+        // Auto-refresh position after a delay
+        setTimeout(() => {
+          log('🔄 Rafraîchissement automatique de la position...');
+          checkAavePosition();
+        }, 5000);
+
+      } catch (error) {
+        log(`❌ Erreur: ${error.message}`, 'error');
+        console.error('Supply error:', error);
       }
     }
 

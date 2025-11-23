@@ -210,12 +210,14 @@ export async function wrapProtocolCallThroughModule(
   const config = await StorageService.getDeFiInteractorConfigForChain(chainId);
 
   if (!config || !config.enabled) {
+    console.log('[DeFi Interactor] Module not enabled for chain', chainId);
     return null;
   }
 
   // Check if the target is a whitelisted protocol
   const whitelisted = config.whitelistedProtocols || [];
   if (!isProtocolCall(transaction, whitelisted)) {
+    console.log('[DeFi Interactor] Target not whitelisted, skipping protocol wrapping');
     return null;
   }
 
@@ -308,19 +310,37 @@ export async function wrapTransactionThroughModule(
   transaction: ethers.TransactionRequest,
   chainId: number
 ): Promise<ethers.TransactionRequest> {
+  console.log('[DeFi Interactor] wrapTransactionThroughModule called:', {
+    chainId,
+    to: transaction.to,
+    hasData: !!transaction.data,
+    dataSelector: transaction.data ? (transaction.data as string).slice(0, 10) : 'none'
+  });
+
   // Get DeFi Interactor Module config for this chain
   const config = await StorageService.getDeFiInteractorConfigForChain(chainId);
 
+  console.log('[DeFi Interactor] Config for chain:', {
+    chainId,
+    hasConfig: !!config,
+    enabled: config?.enabled,
+    moduleAddress: config?.moduleAddress,
+    whitelistedCount: config?.whitelistedProtocols?.length || 0,
+    whitelisted: config?.whitelistedProtocols
+  });
+
   if (!config || !config.enabled) {
     // Module not configured or not enabled for this chain, return original transaction
-    console.log('[DeFi Interactor] Module not configured for chain', chainId);
+    console.log('[DeFi Interactor] Module not configured or disabled for chain', chainId);
     return transaction;
   }
 
   // Try wrapping as ERC20 approve
   if (isERC20Approve(transaction)) {
+    console.log('[DeFi Interactor] Detected ERC20 approve');
     const wrapped = await wrapApproveThroughModule(transaction, chainId);
     if (wrapped) {
+      console.log('[DeFi Interactor] Wrapped approve transaction');
       return wrapped;
     }
     // If approve wrapping failed (spender not whitelisted), return original
@@ -330,14 +350,19 @@ export async function wrapTransactionThroughModule(
 
   // Try wrapping as ERC20 transfer
   if (isERC20Transfer(transaction)) {
+    console.log('[DeFi Interactor] Detected ERC20 transfer');
     return wrapTransferThroughModule(transaction, chainId);
   }
 
   // Try wrapping as protocol call (only if has data and whitelisted)
   if (transaction.data && transaction.data !== '0x') {
+    console.log('[DeFi Interactor] Checking if protocol call');
     const wrapped = await wrapProtocolCallThroughModule(transaction, chainId);
     if (wrapped) {
+      console.log('[DeFi Interactor] Wrapped protocol call');
       return wrapped;
+    } else {
+      console.log('[DeFi Interactor] Protocol call wrapping returned null - target not whitelisted or unwrappable');
     }
   }
 

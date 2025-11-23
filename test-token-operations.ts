@@ -40,7 +40,9 @@ const CONFIG = {
   defiModuleAddress: process.env.DEFI_MODULE_ADDRESS || "",
 
   // Aave V3 Pool address (Sepolia)
-  aavePoolAddress: process.env.AAVE_POOL_ADDRESS || "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
+  aavePoolAddress:
+    process.env.AAVE_POOL_ADDRESS ||
+    "0x6Ae43d3271ff6888e7Fc43Fd7321a503ff738951",
 
   // aToken address (optional, will be fetched if not provided)
   aTokenAddress: process.env.ATOKEN_ADDRESS || "",
@@ -389,6 +391,50 @@ async function testModuleTransfer(
 }
 
 /**
+ * Helper: Check current Aave allowance
+ */
+async function checkAaveAllowance(
+  provider: ethers.Provider,
+  tokenAddress: string,
+  safeAddress: string,
+  aavePoolAddress: string
+): Promise<void> {
+  console.log("\n🔍 Checking Aave Pool Allowance");
+  console.log("=".repeat(50));
+
+  try {
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+    const decimals = await token.decimals();
+    const symbol = await token.symbol();
+
+    const allowance = await token.allowance(safeAddress, aavePoolAddress);
+
+    console.log(`Token: ${symbol} (${tokenAddress})`);
+    console.log(`Safe: ${safeAddress}`);
+    console.log(`Spender (Aave Pool): ${aavePoolAddress}`);
+    console.log(
+      `\nCurrent Allowance: ${ethers.formatUnits(
+        allowance,
+        decimals
+      )} ${symbol}`
+    );
+
+    if (allowance === 0n) {
+      console.log("ℹ️  No approval set. Pool cannot spend Safe's tokens.");
+    } else {
+      console.log(
+        `✅ Pool can spend up to ${ethers.formatUnits(
+          allowance,
+          decimals
+        )} ${symbol}`
+      );
+    }
+  } catch (error) {
+    console.error("❌ Failed to check allowance:", (error as Error).message);
+  }
+}
+
+/**
  * Test 4: Aave V3 Supply through DeFi Interactor Module
  */
 async function testAaveSupply(
@@ -416,7 +462,11 @@ async function testAaveSupply(
   try {
     const module = new ethers.Contract(moduleAddress, DEFI_MODULE_ABI, wallet);
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-    const aavePool = new ethers.Contract(aavePoolAddress, AAVE_POOL_ABI, provider);
+    const aavePool = new ethers.Contract(
+      aavePoolAddress,
+      AAVE_POOL_ABI,
+      provider
+    );
 
     // Check if wallet has required roles
     console.log("Checking permissions...");
@@ -426,50 +476,87 @@ async function testAaveSupply(
     const hasTransferRole = await module.hasRole(wallet.address, TRANSFER_ROLE);
     const hasExecuteRole = await module.hasRole(wallet.address, EXECUTE_ROLE);
 
-    console.log(`  DEFI_TRANSFER_ROLE (2): ${hasTransferRole ? '✅' : '❌'}`);
-    console.log(`  DEFI_EXECUTE_ROLE (1):  ${hasExecuteRole ? '✅' : '❌'}`);
+    console.log(`  DEFI_TRANSFER_ROLE (2): ${hasTransferRole ? "✅" : "❌"}`);
+    console.log(`  DEFI_EXECUTE_ROLE (1):  ${hasExecuteRole ? "✅" : "❌"}`);
 
     if (!hasExecuteRole) {
       console.log(
         `\n❌ Wallet ${wallet.address} does not have DEFI_EXECUTE_ROLE (role 1)`
       );
-      console.log('   The approveProtocol() function requires DEFI_EXECUTE_ROLE.');
-      console.log('   Ask the Safe owner to grant it:');
+      console.log(
+        "   The approveProtocol() function requires DEFI_EXECUTE_ROLE."
+      );
+      console.log("   Ask the Safe owner to grant it:");
       console.log(`   module.grantRole("${wallet.address}", 1)`);
       return false;
     }
 
     // Check if Aave pool is whitelisted
-    const isAaveAllowed = await module.allowedAddresses(wallet.address, aavePoolAddress);
-    console.log(`  Aave Pool whitelisted:   ${isAaveAllowed ? '✅' : '❌'}`);
+    const isAaveAllowed = await module.allowedAddresses(
+      wallet.address,
+      aavePoolAddress
+    );
+    console.log(`  Aave Pool whitelisted:   ${isAaveAllowed ? "✅" : "❌"}`);
 
     if (!isAaveAllowed) {
+      console.log(`\n❌ Aave Pool is not whitelisted for ${wallet.address}`);
+      console.log("   Ask the Safe owner to whitelist it:");
       console.log(
-        `\n❌ Aave Pool is not whitelisted for ${wallet.address}`
+        `   module.setAllowedAddress("${wallet.address}", "${aavePoolAddress}", true)`
       );
-      console.log('   Ask the Safe owner to whitelist it:');
-      console.log(`   module.setAllowedAddress("${wallet.address}", "${aavePoolAddress}", true)`);
       return false;
     }
 
-    console.log('✅ All permissions verified!');
+    console.log("✅ All permissions verified!");
 
     // Check Safe's token balance
     const safeBalanceBefore = await token.balanceOf(safeAddress);
     const decimals = await token.decimals();
 
-    console.log(`\nSafe token balance: ${ethers.formatUnits(safeBalanceBefore, decimals)}`);
+    console.log(
+      `\nSafe token balance: ${ethers.formatUnits(safeBalanceBefore, decimals)}`
+    );
 
     if (safeBalanceBefore === BigInt(0)) {
       console.log("⚠️  WARNING: Safe wallet has 0 tokens!");
       return false;
     }
 
+    // Check current allowance for Aave pool
+    const currentAllowance = await token.allowance(
+      safeAddress,
+      aavePoolAddress
+    );
+    console.log(
+      `Current Aave Pool allowance: ${ethers.formatUnits(
+        currentAllowance,
+        decimals
+      )}`
+    );
+    if (currentAllowance > 0n) {
+      console.log(
+        `  ℹ️  Pool already has approval for ${ethers.formatUnits(
+          currentAllowance,
+          decimals
+        )} tokens`
+      );
+    }
+
     // Get Safe's position on Aave before
     const accountDataBefore = await aavePool.getUserAccountData(safeAddress);
     console.log(`\nAave position before:`);
-    console.log(`  Total Collateral: ${ethers.formatUnits(accountDataBefore.totalCollateralBase, 8)} USD`);
-    console.log(`  Total Debt: ${ethers.formatUnits(accountDataBefore.totalDebtBase, 8)} USD`);
+    console.log(
+      `  Total Collateral: ${ethers.formatUnits(
+        accountDataBefore.totalCollateralBase,
+        8
+      )} USD`
+    );
+    console.log(
+      `  Total Debt: ${ethers.formatUnits(
+        accountDataBefore.totalDebtBase,
+        8
+      )} USD`
+    );
 
     // Step 1: Approve Aave pool to spend tokens via module
     console.log(`\nStep 1: Approving Aave pool to spend tokens...`);
@@ -493,15 +580,19 @@ async function testAaveSupply(
 
     // Encode the supply call
     const supplyData = aavePool.interface.encodeFunctionData("supply", [
-      tokenAddress,    // asset
-      amount,          // amount
-      safeAddress,     // onBehalfOf (Safe wallet)
-      0                // referralCode
+      tokenAddress, // asset
+      amount, // amount
+      safeAddress, // onBehalfOf (Safe wallet)
+      0, // referralCode
     ]);
 
-    console.log(`  Encoded data: ${supplyData.slice(0, 10)}...`);
+    console.log(tokenAddress, amount, safeAddress);
+    console.log(`  Encoded data: ${supplyData}`);
 
-    const supplyTx = await module.executeOnProtocol(aavePoolAddress, supplyData);
+    const supplyTx = await module.executeOnProtocol(
+      aavePoolAddress,
+      supplyData
+    );
     console.log(`  Supply TX: ${supplyTx.hash}`);
 
     console.log("  Waiting for confirmation...");
@@ -511,11 +602,25 @@ async function testAaveSupply(
     // Check Safe's position on Aave after
     const accountDataAfter = await aavePool.getUserAccountData(safeAddress);
     console.log(`\nAave position after:`);
-    console.log(`  Total Collateral: ${ethers.formatUnits(accountDataAfter.totalCollateralBase, 8)} USD`);
-    console.log(`  Total Debt: ${ethers.formatUnits(accountDataAfter.totalDebtBase, 8)} USD`);
+    console.log(
+      `  Total Collateral: ${ethers.formatUnits(
+        accountDataAfter.totalCollateralBase,
+        8
+      )} USD`
+    );
+    console.log(
+      `  Total Debt: ${ethers.formatUnits(
+        accountDataAfter.totalDebtBase,
+        8
+      )} USD`
+    );
 
-    const collateralChange = accountDataAfter.totalCollateralBase - accountDataBefore.totalCollateralBase;
-    console.log(`  Collateral change: +${ethers.formatUnits(collateralChange, 8)} USD`);
+    const collateralChange =
+      accountDataAfter.totalCollateralBase -
+      accountDataBefore.totalCollateralBase;
+    console.log(
+      `  Collateral change: +${ethers.formatUnits(collateralChange, 8)} USD`
+    );
 
     // Check Safe's token balance after
     const safeBalanceAfter = await token.balanceOf(safeAddress);
@@ -529,6 +634,18 @@ async function testAaveSupply(
     if (tokenChange.toString() === amount) {
       console.log("✅ Supply amounts verified!");
     }
+
+    // Check remaining allowance for Aave pool
+    const remainingAllowance = await token.allowance(
+      safeAddress,
+      aavePoolAddress
+    );
+    console.log(
+      `\nRemaining allowance for Aave Pool: ${ethers.formatUnits(
+        remainingAllowance,
+        decimals
+      )}`
+    );
 
     return true;
   } catch (error) {
@@ -629,8 +746,22 @@ async function main() {
   //   );
   // }
 
+  // Check current Aave allowance (optional)
+  if (CONFIG.safeAddress && CONFIG.aavePoolAddress) {
+    await checkAaveAllowance(
+      provider,
+      CONFIG.tokenAddress,
+      CONFIG.safeAddress,
+      CONFIG.aavePoolAddress
+    );
+  }
+
   // Test 4: Aave Supply (optional)
-  if (CONFIG.defiModuleAddress && CONFIG.safeAddress && CONFIG.aavePoolAddress) {
+  if (
+    CONFIG.defiModuleAddress &&
+    CONFIG.safeAddress &&
+    CONFIG.aavePoolAddress
+  ) {
     results.aaveSupply = await testAaveSupply(
       provider,
       wallet,

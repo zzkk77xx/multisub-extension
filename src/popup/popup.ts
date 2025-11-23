@@ -1068,14 +1068,9 @@ async function loadSpoofConfig() {
       addressInput.value = config.spoofedAddress || '';
     }
 
-    // Show/hide address input based on enabled state
-    if (config.enabled) {
-      addressGroup?.style.setProperty('display', 'block');
-      saveBtn?.style.setProperty('display', 'block');
-    } else {
-      addressGroup?.style.setProperty('display', 'none');
-      saveBtn?.style.setProperty('display', 'none');
-    }
+    // Always show address input and save button
+    addressGroup?.style.setProperty('display', 'block');
+    saveBtn?.style.setProperty('display', 'block');
   } catch (error) {
     console.error('Failed to load spoof config:', error);
   }
@@ -1089,13 +1084,13 @@ function handleSpoofEnabledChange() {
   const addressGroup = document.getElementById('spoof-address-group');
   const saveBtn = document.getElementById('save-spoof-btn');
 
-  if (enabledCheckbox.checked) {
+  // if (enabledCheckbox.checked) {
     addressGroup?.style.setProperty('display', 'block');
     saveBtn?.style.setProperty('display', 'block');
-  } else {
-    addressGroup?.style.setProperty('display', 'none');
-    saveBtn?.style.setProperty('display', 'block'); // Keep save button visible to save disabled state
-  }
+  // } else {
+  //   addressGroup?.style.setProperty('display', 'none');
+  //   saveBtn?.style.setProperty('display', 'block'); // Keep save button visible to save disabled state
+  // }
 }
 
 /**
